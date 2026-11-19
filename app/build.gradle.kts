@@ -162,11 +162,17 @@ android {
     // applicationId can only be overridden per flavor, not per build type, so a
     // dev/prod dimension exists purely to let both sit installed side by side
     // on the same device instead of the dev build overwriting the prod one.
+    //
+    // The dev id carries this fork's own name. `com.dev.bitchord` alone is the
+    // id every fork of Auris uses for its dev flavour, so two of them — this
+    // one and Appix, say — are the same app to the package manager: installing
+    // the second replaces the first. The suffix gives this build a slot of its
+    // own, beside the prod app and beside the other forks' dev builds.
     flavorDimensions += "env"
     productFlavors {
         create("dev") {
             dimension = "env"
-            applicationId = "com.dev.bitchord"
+            applicationId = "com.dev.bitchord.revanced"
             // The dev build wears the same name as the app it is: the label
             // is what the launcher shows, and "Auris" on a build of Appix is
             // somebody else's name on our icon.
@@ -596,10 +602,10 @@ val verifyDevInstall = tasks.register("verifyDevInstall") {
             .drop(1)
             .mapNotNull { line -> line.split('\t').takeIf { it.size == 2 && it[1] == "device" }?.get(0) }
         serials.forEach { serial ->
-            logger.lifecycle("verifyDevInstall: compiling com.dev.bitchord on $serial")
+            logger.lifecycle("verifyDevInstall: compiling com.dev.bitchord.revanced on $serial")
             ProcessBuilder(
                 adbPath, "-s", serial, "shell", "cmd", "package", "compile",
-                "-m", "verify", "-f", "com.dev.bitchord",
+                "-m", "verify", "-f", "com.dev.bitchord.revanced",
             ).inheritIO().start().waitFor()
         }
     }

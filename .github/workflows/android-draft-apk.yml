@@ -387,7 +387,7 @@ jobs:
       - name: Check the package, version and signature
         env:
           EXPECTED_FINGERPRINT: "f0efd2c7d4ae0ef12f2e24f8a6a677697ceea46e86b4d9de4201e7387c7a5378"
-          EXPECTED_PACKAGE: "com.dev.bitchord"
+          EXPECTED_PACKAGE: "com.dev.bitchord.revanced"
         run: |
           set -euo pipefail
           bt="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"

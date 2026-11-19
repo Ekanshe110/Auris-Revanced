@@ -150,7 +150,7 @@
     <string name="home_provider_spotify_subtitle">Spotify\'s own home and catalogue. Signed in, Flow also takes from what you play there.</string>
     <string name="home_provider_youtube_subtitle">YouTube Music\'s own home and catalogue, and its feed for Flow.</string>
     <string name="home_provider_restart">Auris will restart to apply this.</string>
-    <string name="settings_category_provider">Provider</string>
+    <string name="settings_category_provider">Providers</string>
     <string name="provider_footer">The three axes are independent: any mix of them works. Apple is read through an installed Apple Music manifest, never from inside the app.</string>
     <string name="provider_apple_master">Apple Music everywhere</string>
     <string name="provider_apple_master_subtitle">Points the look, the recommendations and the catalogue at Apple Music in one tap.</string>

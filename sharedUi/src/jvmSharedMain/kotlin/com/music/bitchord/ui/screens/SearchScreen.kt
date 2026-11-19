@@ -375,18 +375,32 @@ fun SearchScreen(
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                             }
-                            item(key = "catalogue:row:${shelf.title}") {
-                                ShelfRow(
-                                    contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                                    horizontalArrangement = Arrangement.spacedBy(AppleTokens.GridGutter),
-                                ) {
-                                    itemsIndexed(
-                                        items = shelf.items,
-                                        key = { index, entry ->
-                                            "catalogue:${shelf.title}:${entry.browseId ?: index}"
-                                        },
-                                    ) { _, entry ->
-                                        CatalogueCard(entry) { onCatalogueClick(entry) }
+                            // Two across, the way the vendor's own browse
+                            // page draws a catalogue: a grid of square
+                            // covers with the title and the artist under it,
+                            // not a scanner of rows.
+                            shelf.items.chunked(2).forEachIndexed { rowIndex, pair ->
+                                item(key = "catalogue:row:${shelf.title}:$rowIndex") {
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(
+                                                start = PAGE_GUTTER,
+                                                end = PAGE_GUTTER,
+                                                bottom = AppleTokens.GridGutter,
+                                            ),
+                                    ) {
+                                        pair.forEachIndexed { index, entry ->
+                                            CatalogueCard(
+                                                item = entry,
+                                                modifier = Modifier.weight(1f),
+                                                onClick = { onCatalogueClick(entry) },
+                                            )
+                                            if (index != pair.lastIndex) {
+                                                Spacer(Modifier.width(AppleTokens.GridGutter))
+                                            }
+                                        }
+                                        if (pair.size == 1) Spacer(Modifier.weight(1f))
                                     }
                                 }
                             }
@@ -1237,10 +1251,13 @@ private fun LazyListScope.recentlyPlayedRows(
  * playlist's page, a station.
  */
 @Composable
-private fun CatalogueCard(item: ShelfItem, onClick: () -> Unit) {
+private fun CatalogueCard(
+    item: ShelfItem,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
     Column(
-        Modifier
-            .width(150.dp)
+        modifier
             .clickable(onClick = onClick),
     ) {
         Box(

@@ -85,6 +85,7 @@ import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.SearchHistoryEntity
 import com.music.bitchord.data.model.EntityType
 import com.music.bitchord.ui.components.MessageState
+import com.music.bitchord.ui.components.AppleTokens
 import com.music.bitchord.ui.components.LazyContent
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.RowMoreButton
@@ -377,7 +378,7 @@ fun SearchScreen(
                             item(key = "catalogue:row:${shelf.title}") {
                                 ShelfRow(
                                     contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(AppleTokens.GridGutter),
                                 ) {
                                     itemsIndexed(
                                         items = shelf.items,
@@ -1069,14 +1070,14 @@ private fun GenreGrid(genres: List<GenreTile>, onGenreClick: (GenreTile) -> Unit
             .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
     ) {
         genres.chunked(2).forEach { row ->
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = AppleTokens.GridGutter)) {
                 row.forEachIndexed { index, genre ->
                     GenreCard(
                         genre = genre,
                         modifier = Modifier.weight(1f),
                         onClick = { onGenreClick(genre) },
                     )
-                    if (index != row.lastIndex) Spacer(Modifier.width(8.dp))
+                    if (index != row.lastIndex) Spacer(Modifier.width(AppleTokens.GridGutter))
                 }
                 if (row.size == 1) Spacer(Modifier.weight(1f))
             }
@@ -1090,7 +1091,7 @@ private fun GenreCard(genre: GenreTile, modifier: Modifier, onClick: () -> Unit)
     Box(
         modifier = modifier
             .aspectRatio(1.9f)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(AppleTokens.CornerLarge))
             .clickable(onClick = onClick)
             // A Brush on both branches: an artwork tile sits on a transparent
             // gradient rather than a Color, which would make the argument
@@ -1246,7 +1247,7 @@ private fun CatalogueCard(item: ShelfItem, onClick: () -> Unit) {
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(AppleTokens.CornerSmall))
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             if (item.thumbnailUrl != null) {

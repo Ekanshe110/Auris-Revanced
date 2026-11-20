@@ -1,6 +1,7 @@
 package com.music.bitchord.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +42,7 @@ import com.music.bitchord.data.model.ROW_ART_PX
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.artworkAt
 import com.music.bitchord.ui.components.MessageState
+import com.music.bitchord.ui.components.AppleTokens
 import com.music.bitchord.ui.components.PAGE_GUTTER
 import com.music.bitchord.ui.components.PullToRefresh
 import com.music.bitchord.ui.components.feedSkeleton
@@ -272,8 +274,16 @@ private fun AppleOnAirRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                        // `live_radio_tile.xml`: a square tile at
+                        // @dimen/radio_live_tile_corner_radius (20dp) with a
+                        // 0.5dp @color/rounded_image_stroke_color hairline.
+                        .clip(RoundedCornerShape(AppleTokens.LiveTileRadius))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .border(
+                            width = 0.5.dp,
+                            color = Color(0x1A000000),
+                            shape = RoundedCornerShape(AppleTokens.LiveTileRadius),
+                        ),
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(

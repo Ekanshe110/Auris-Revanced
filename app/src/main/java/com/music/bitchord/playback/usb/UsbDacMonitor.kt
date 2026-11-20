@@ -192,7 +192,7 @@ class UsbDacMonitor(
     }
 
     private companion object {
-        const val ACTION_USB_PERMISSION = "com.dev.bitchord.playback.USB_PERMISSION"
+        const val ACTION_USB_PERMISSION = "com.dev.bitchord.revanced.playback.USB_PERMISSION"
         const val USB_PERMISSION_REQUEST = 4107
     }
 }

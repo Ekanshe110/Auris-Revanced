@@ -85,25 +85,38 @@ internal class SflxSearchMemo<V>(
      * the answer is kept for the next caller.
      */
     suspend fun once(key: String, ask: suspend () -> Result<V>): Result<V> {
-        cached(key)?.let { return Result.success(it) }
-        val flight = CompletableDeferred<Result<V>>()
-        val running = flights.putIfAbsent(key, flight)
-        if (running != null) return running.await()
-        scope.launch {
-            val answer = try {
-                ask()
-            } catch (error: Throwable) {
-                if (error is CancellationException) {
-                    flight.completeExceptionally(error)
+        while (true) {
+            cached(key)?.let { return Result.success(it) }
+            val flight = CompletableDeferred<Result<V>>()
+            val running = flights.putIfAbsent(key, flight)
+            if (running == null) {
+                scope.launch {
+                    val answer = try {
+                        ask()
+                    } catch (error: Throwable) {
+                        if (error is CancellationException) {
+                            flight.completeExceptionally(error)
+                            flights.remove(key, flight)
+                            return@launch
+                        }
+                        Result.failure(SflxException(error.message ?: "the question failed"))
+                    }
+                    answer.onSuccess { put(key, it) }
+                    flight.complete(answer)
                     flights.remove(key, flight)
-                    return@launch
                 }
-                Result.failure(SflxException(error.message ?: "the question failed"))
+                return flight.await()
             }
-            answer.onSuccess { put(key, it) }
-            flight.complete(answer)
-            flights.remove(key, flight)
+            if (running.isCompleted) {
+                // The question that was running has finished, and its answer
+                // is no longer in the cache — it went stale, or it was
+                // forgotten. Its finished flight must not be handed to this
+                // caller: the answer wanted here is a new one, so the old
+                // flight is dropped and the question is asked again.
+                flights.remove(key, running)
+                continue
+            }
+            return running.await()
         }
-        return flight.await()
     }
 }

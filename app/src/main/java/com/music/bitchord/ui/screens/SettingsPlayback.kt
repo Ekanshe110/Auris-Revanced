@@ -44,6 +44,7 @@ import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.AutomixPerformanceMode
 import com.music.bitchord.data.settings.HomeProvider
+import com.music.bitchord.data.settings.MusicProvider
 import com.music.bitchord.playback.AudioOutputStatus
 import kotlin.math.roundToInt
 
@@ -133,6 +134,11 @@ internal fun PlaybackSettings(
                 onClick = { sheets.pickingAutomixPerformance = true },
             )
         }
+        // The catalogue choice is not a playback setting: it is a provider
+        // axis, and it lives on the Provider page where the other two axes
+        // are. It used to sit here, next to the other decisions about how
+        // the app finds music, which made one of the three axes look like
+        // the only one that existed.
         val skipSilenceTitle = stringResource(R.string.skip_silence)
         row(skipSilenceTitle, "silence") {
             SettingsRow(
@@ -300,8 +306,9 @@ internal fun HomeProvider.localizedLabel(): String = stringResource(
  */
 @Composable
 internal fun HomeProviderSheet(
-    selected: HomeProvider,
-    onSelect: (HomeProvider) -> Unit,
+    selected: MusicProvider,
+    onSelect: (MusicProvider) -> Unit,
+    appleAvailable: Boolean = true,
 ) {
     val haptics = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
@@ -330,12 +337,15 @@ internal fun HomeProviderSheet(
                 .weight(1f, fill = false)
                 .verticalScroll(rememberScrollState()),
         ) {
-            HomeProvider.entries.forEach { provider ->
+            MusicProvider.entries.forEach { provider ->
                 val chosen = provider == selected
+                // Apple is only offered when an Apple Music manifest is
+                // installed: without one there is no Apple catalogue to read.
+                val available = provider != MusicProvider.APPLE || appleAvailable
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
+                        .clickable(enabled = available) {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelect(provider)
                         }
@@ -346,13 +356,18 @@ internal fun HomeProviderSheet(
                         Text(
                             text = provider.localizedLabel(),
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onBackground,
+                            color = if (available) {
+                                MaterialTheme.colorScheme.onBackground
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                         )
                         Text(
                             text = stringResource(
                                 when (provider) {
-                                    HomeProvider.YOUTUBE -> R.string.home_provider_youtube_subtitle
-                                    HomeProvider.SPOTIFY -> R.string.home_provider_spotify_subtitle
+                                    MusicProvider.YOUTUBE -> R.string.home_provider_youtube_subtitle
+                                    MusicProvider.SPOTIFY -> R.string.home_provider_spotify_subtitle
+                                    MusicProvider.APPLE -> R.string.provider_apple_subtitle
                                 },
                             ),
                             style = MaterialTheme.typography.bodyMedium,

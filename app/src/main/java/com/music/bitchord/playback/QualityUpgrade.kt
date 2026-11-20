@@ -373,6 +373,10 @@ object QualityUpgrade {
      */
     fun couldStillUpgrade(mediaId: String, uri: Uri?, explicit: Boolean = false): Boolean {
         if (uri == null || uri.getQueryParameter("m") == "1") return false
+        // A live station has no better copy. It is one continuous stream, and
+        // the hunt for another rendition of it finds something else entirely —
+        // which then replaces the broadcast and leaves a hiss in its place.
+        if (LiveRadio.isLiveStream(uri)) return false
         // A downloaded file plays, and the second look for one is not about
         // replacing it with a stream — it is about what the *sources* can add
         // on top of it. Two things follow, and both are below.

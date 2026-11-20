@@ -237,6 +237,20 @@ fun MediaController.swapToVersion(targetSong: Song) {
 }
 
 /**
+ * Asks the service to re-open the playing track in another rendition, at the
+ * same position.
+ *
+ * The rendition is named rather than numbered, so the service can answer with
+ * the same word the resolver reads back: `atmos`, `hires` or `lossless`.
+ */
+fun MediaController.switchRendition(rendition: String) {
+    sendCustomCommand(
+        SessionCommand(ACTION_SWITCH_RENDITION, Bundle.EMPTY),
+        bundleOf(EXTRA_RENDITION to rendition),
+    )
+}
+
+/**
  * The credited artists, read back out of the two parallel lists they travel in.
  *
  * A `Song` is a data class and a `MediaItem`'s extras are a `Bundle`, which
@@ -283,6 +297,9 @@ fun Song.toSongBundle(): Bundle = bundleOf(
     "playbackSourceType" to playbackSourceType?.name,
     "playbackSourceId" to playbackSourceId,
     "isExplicit" to (isExplicit ?: false),
+    "atmosAvailable" to atmosAvailable,
+    "hiResAvailable" to hiResAvailable,
+    "isrc" to isrc,
     // `bundleOf` has no overload for a list of strings, so the two halves of
     // the credits go in afterwards.
 ).apply {
@@ -303,7 +320,9 @@ fun songFromBundle(b: Bundle): Song = Song(
     isVideo = b.getBoolean("isVideo"),
     isVideoOrigin = b.getBoolean("isVideoOrigin"),
     setVideoId = b.getString("setVideoId"),
-    fromAutoplay = b.getBoolean("fromAutoplay"),
+    // The primary constructor owns the tier; the legacy `fromAutoplay` bool
+    // is the fallback for bundles written before the tier was carried.
+    queueTier = if (b.getBoolean("fromAutoplay")) QueueTier.AUTOPLAY else QueueTier.CONTEXT,
     radioName = b.getString("radioName"),
     localUri = b.getString("localUri"),
     downloadFormat = b.getString("downloadFormat"),
@@ -312,7 +331,10 @@ fun songFromBundle(b: Bundle): Song = Song(
     playbackSource = b.getString("playbackSource"),
     playbackSourceType = b.getString("playbackSourceType")?.let { runCatching { com.music.bitchord.data.model.PlaybackSourceType.valueOf(it) }.getOrNull() },
     playbackSourceId = b.getString("playbackSourceId"),
+    isrc = b.getString("isrc"),
     isExplicit = if (b.containsKey("isExplicit")) b.getBoolean("isExplicit") else null,
+    atmosAvailable = b.getBoolean("atmosAvailable"),
+    hiResAvailable = b.getBoolean("hiResAvailable"),
 )
 
 /** Flushes the current radio queue to disk before reporting that it started. */
@@ -583,6 +605,10 @@ fun MediaItem.toSong() = Song(
     // though both had been known.
     downloadFormat = mediaMetadata.extras?.getString(EXTRA_DOWNLOAD_FORMAT),
     sourceQuality = mediaMetadata.extras?.getString(EXTRA_SOURCE_QUALITY),
+    atmosAvailable = mediaMetadata.extras?.getBoolean(EXTRA_ATMOS_AVAILABLE) == true,
+    hiResAvailable = mediaMetadata.extras?.getBoolean(EXTRA_HIRES_AVAILABLE) == true,
+    liveStreamUrl = mediaMetadata.extras?.getString(EXTRA_LIVE_STREAM_URL),
+    liveLicenseUrl = mediaMetadata.extras?.getString(EXTRA_LIVE_LICENSE_URL),
 )
 
 /** @see Song.fromAutoplay */
@@ -687,6 +713,51 @@ private const val EXTRA_VIDEO_ORIGIN = "bitchord.isVideoOrigin"
 /** Set only on the replacement item produced by [QualityUpgrade]. */
 const val EXTRA_QUALITY_UPGRADED = "bitchord.qualityUpgraded"
 
+/** @see Song.atmosAvailable */
+internal const val EXTRA_ATMOS_AVAILABLE = "bitchord.atmosAvailable"
+
+/** @see Song.hiResAvailable */
+internal const val EXTRA_HIRES_AVAILABLE = "bitchord.hiResAvailable"
+
+/** @see Song.liveStreamUrl */
+internal const val EXTRA_LIVE_STREAM_URL = "bitchord.liveStreamUrl"
+
+/** @see Song.liveLicenseUrl */
+internal const val EXTRA_LIVE_LICENSE_URL = "bitchord.liveLicenseUrl"
+
+/**
+ * The DRM scheme Apple's live radio is protected with.
+ *
+ * Widevine, named by the UUID that identifies it in a playlist's key line
+ * and in Media3's own configuration. Apple's stations also publish PlayReady
+ * and FairPlay keys; Widevine is the one an Android device can actually
+ * play.
+ */
+internal val WIDEVINE_UUID: java.util.UUID =
+    java.util.UUID.fromString("edef8ba9-79d6-4ace-a3c8-27dcd51d21ed")
+
+/**
+ * The license endpoint that belongs to an addon live playlist.
+ *
+ * `/radio/playlist/<station>/master.m3u8` is served by the addon that also
+ * answers `/radio/license`; the station id in the path is the one the license
+ * is bought for. Null for a playlist that is not the addon's own.
+ */
+private fun licenseFromLivePlaylist(playlist: String): String? {
+    val marker = "/radio/playlist/"
+    val at = playlist.indexOf(marker)
+    if (at < 0) return null
+    val station = playlist.substring(at + marker.length).substringBefore('/')
+    if (station.isBlank()) return null
+    return playlist.substring(0, at) + "/radio/license?station=" + station
+}
+
+/**
+ * The rendition the listener asked for, in the session command that carries
+ * the switch: `atmos`, `hires` or `lossless`.
+ */
+internal const val EXTRA_RENDITION = "bitchord.rendition"
+
 /**
  * Whether this item was selected from a music-video row, even after conversion.
  *
@@ -759,6 +830,9 @@ private fun Song.matchQuery(): String = buildString {
     TrackMatcher.secondsOf(durationText)?.let { append("&d=").append(it) }
     albumName?.takeIf { it.isNotBlank() }?.let { append("&l=").append(Uri.encode(it)) }
     isExplicit?.let { append("&e=").append(if (it) "1" else "0") }
+    // The recording's ISRC, so the resolver can match it elsewhere before it
+    // falls back to titles. See [TrackMatcher.score].
+    isrc?.trim()?.takeIf { it.isNotEmpty() }?.let { append("&i=").append(Uri.encode(it)) }
     // `m` controls source routing, not player policy. A converted catalogue
     // track keeps [isVideoOrigin] for AutoMix, but is intentionally audio here
     // so the normal source-quality upgrade path can improve it.
@@ -859,7 +933,13 @@ fun Song.toMediaItem(parentBrowseId: String? = null, playLocalFile: Boolean = tr
     val offlineFormat: String? = if (playFile) Downloads.savedFormat(videoId) else null
     val formatBadge: String? = downloadFormat ?: offlineFormat
     val playUri = offlineUri?.takeIf { playFile }
+    // Copied into a local first: a property of another module cannot be
+    // smart-cast, and the branch below has to know the stream is there.
+    val liveStream = liveStreamUrl
     val uriString = playUri ?: when {
+        // A live station is one continuous stream with a known address: there
+        // is nothing to resolve, and the row carries the playlist itself.
+        liveStream != null -> liveStream
         videoId.startsWith("content://") || videoId.startsWith("file://") -> videoId
         // A chapter of a public-domain book is a file on an archive, not a
         // YouTube track: its URL is the whole of its identity, and there is
@@ -890,6 +970,32 @@ fun Song.toMediaItem(parentBrowseId: String? = null, playLocalFile: Boolean = tr
     return MediaItem.Builder()
         .setMediaId(videoId)
         .setUri(resolvePlaybackUri(uriString, localPath))
+        // A live station's audio is encrypted, and the key has to come from
+        // somewhere: the license endpoint the row carries. The scheme is
+        // Widevine, because that is what the stream is protected with.
+        //
+        // More than one session, because a live station rotates its key: the
+        // playlist starts naming a different key every few minutes, and a
+        // player that keeps the session it already has would keep decrypting
+        // with the key it has — which is not the key the audio is encrypted
+        // under any more. With this set, a new key means a new session, and
+        // a new session means a new license, which is what the station needs.
+        .apply {
+            // A restored queue made before the license field existed, or a
+            // row rebuilt from just the stream address, still carries the
+            // playlist the addon serves. The license lives beside it, so it
+            // can be named from there rather than leaving the item without
+            // DRM — which plays the encrypted bytes as silence.
+            val license = liveLicenseUrl ?: liveStream?.let(::licenseFromLivePlaylist)
+            if (license != null) {
+                setDrmConfiguration(
+                    MediaItem.DrmConfiguration.Builder(WIDEVINE_UUID)
+                        .setLicenseUri(license)
+                        .setMultiSession(true)
+                        .build(),
+                )
+            }
+        }
     .setMediaMetadata(
         MediaMetadata.Builder()
             .setTitle(title)
@@ -942,6 +1048,8 @@ fun Song.toMediaItem(parentBrowseId: String? = null, playLocalFile: Boolean = tr
                     artistId != null || albumId != null || setVideoId != null ||
                     isExplicit != null || isVideo || isVideoOrigin || radioName != null ||
                     playbackSource != null || playbackSourceType != null || playbackSourceId != null ||
+                    atmosAvailable || hiResAvailable ||
+                    liveStreamUrl != null || liveLicenseUrl != null ||
                     parentBrowseId != null
                 ) {
                     setExtras(
@@ -971,6 +1079,14 @@ fun Song.toMediaItem(parentBrowseId: String? = null, playLocalFile: Boolean = tr
                             EXTRA_EXPLICIT to isExplicit,
                             EXTRA_IS_VIDEO to isVideo,
                             EXTRA_VIDEO_ORIGIN to isVideoOrigin,
+                            EXTRA_ATMOS_AVAILABLE to atmosAvailable,
+                            EXTRA_HIRES_AVAILABLE to hiResAvailable,
+                            // A live station's own address and its license
+                            // endpoint: without them the row would come back
+                            // from the session as an ordinary track with
+                            // nothing to play.
+                            EXTRA_LIVE_STREAM_URL to liveStreamUrl,
+                            EXTRA_LIVE_LICENSE_URL to liveLicenseUrl,
                         ),
                     )
                 }

@@ -78,6 +78,18 @@ object AudioCache {
     private const val TAG = "BitChord"
 
     /**
+     * The hosts Apple's live radio streams come from.
+     *
+     * The playlist, the media playlist and the segments all live on Apple's
+     * own radio hosts, and none of them is a file worth keeping.
+     */
+    private val LIVE_RADIO_HOSTS = setOf(
+        "itsliveradio.apple.com",
+        "liveradio.music.apple.com",
+        "liveradiobackup.music.apple.com",
+    )
+
+    /**
      * The prefix of a row that exists only in Spotify's catalogue.
      *
      * Such a row has no playable id of its own: the sources are asked for the
@@ -427,7 +439,11 @@ object AudioCache {
         val family = uri.getQueryParameter("v")?.let { videoId ->
             cache.keys.filter { it == videoId || it.startsWith("$videoId#") }
         } ?: emptyList()
-        (family + exact).distinct().forEach { key ->
+        // Playlists kept by an older build go too: they are never read now
+        // (see [isPlaylist]), and a kept playlist of a live station is a
+        // stale one, which is worse than no playlist at all.
+        val playlists = cache.keys.filter { it.endsWith(".m3u8", ignoreCase = true) }
+        (family + exact + playlists).distinct().forEach { key ->
             runCatching { cache.removeResource(key) }
                 .onSuccess { TrackLog.d(TAG, "discarded cache entry $key", about = about) }
                 .onFailure { TrackLog.d(TAG, "cache entry $key still in use: ${it.message}", about = about) }
@@ -556,7 +572,14 @@ object AudioCache {
                 val track = uri.getQueryParameter("t")
                 if (source != null && track != null) {
                     val base = "$source|$track"
-                    QualityUpgrade.cacheTag(uri)?.let { "$base#$it" } ?: base
+                    // The rendition is part of the key: the lossless master and
+                    // the Atmos mix of one recording are different files, and
+                    // an entry written for one of them must never be served
+                    // for the other. The switch rides on the URI — see
+                    // [PlaybackService.switchCurrentRendition] — so it is read
+                    // here rather than kept anywhere else.
+                    val tag = QualityUpgrade.cacheTag(uri) ?: uri.getQueryParameter("rend")
+                    tag?.let { "$base#$it" } ?: base
                 } else {
                     null
                 }
@@ -944,6 +967,36 @@ object AudioCache {
         }
     }
 
+    /**
+     * Apple's live radio streams are continuous: they never end, and the same
+     * address serves different audio a minute later. Caching them would fill
+     * the disk with a stream that is never the same twice, and would serve a
+     * stale playlist on the next play — so they go straight to the network,
+     * like a file does.
+     */
+    private fun isLiveRadio(uri: Uri): Boolean {
+        val host = uri.host?.lowercase() ?: return false
+        return LIVE_RADIO_HOSTS.any { host == it || host.endsWith(".$it") }
+    }
+
+    /**
+     * Whether an address is a playlist rather than a song.
+     *
+     * A playlist is a few kilobytes that changes every few seconds, and it is
+     * fetched from the same address every time — so there is nothing to gain
+     * from keeping it, and a great deal to lose: a kept playlist is a stale
+     * one, and for a live station a stale playlist names the key the stream
+     * was encrypted under a moment ago, which is a key the stream is no
+     * longer under. The player then asks its DRM system for a scheme the
+     * stale playlist never named, and the station refuses to play with
+     * "Media does not support uuid: edef8ba9…".
+     *
+     * So playlists never touch the disk cache — they go to the network, like
+     * the live audio they describe.
+     */
+    private fun isPlaylist(uri: Uri): Boolean =
+        uri.path?.lowercase()?.endsWith(".m3u8") == true
+
     /** The part of a cache key that names the track, before any `#rendition`; see [keyFactory]. */
     private fun cacheKeyBaseOf(mediaId: String): String =
         SourceRegistry.parseTrackKey(mediaId)?.let { (source, track) -> "$source|$track" } ?: mediaId
@@ -1034,7 +1087,12 @@ object AudioCache {
 
             override fun open(dataSpec: DataSpec): Long {
                 val scheme = dataSpec.uri.scheme
-                activeDs = if (scheme == "file" || scheme == "content") {
+                activeDs = if (
+                    scheme == "file" ||
+                    scheme == "content" ||
+                    isLiveRadio(dataSpec.uri) ||
+                    isPlaylist(dataSpec.uri)
+                ) {
                     upstreamDs
                 } else {
                     cacheDs
@@ -3751,6 +3809,11 @@ object AudioCache {
         durationSeconds: Double,
         settleAt: Long = 0L,
     ) {
+        // A live radio stream is not a file: it never ends, the same address
+        // serves different audio a minute later, and there is nothing to
+        // measure a tempo from. Reading ahead would fill the disk with a
+        // stream that is never the same twice.
+        if (isLiveRadio(uri)) return
         val key = cacheKeyOf(uri)
         // The start-latency megabyte goes first whatever it turns out to be
         // worth, because it is what makes the track begin the moment it is

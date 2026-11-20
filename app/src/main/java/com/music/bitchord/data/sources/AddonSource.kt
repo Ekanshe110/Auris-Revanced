@@ -231,6 +231,13 @@ class AddonSource(
                         } else {
                             ModuleSource.qualityTier("${track.audioQuality} ${track.format}")
                         },
+                        // The recording's identity across catalogues.
+                        isrc = track.isrc?.trim()?.takeIf { it.isNotEmpty() },
+                        // Whether the catalogue holds an Atmos mix of this
+                        // recording, so the player can offer the switch.
+                        atmosAvailable = track.isDolbyAtmos,
+                        // And whether it holds a Hi-Res master.
+                        hiResAvailable = track.isHiResLossless,
                     )
                 }
                 .toList()
@@ -328,6 +335,13 @@ class AddonSource(
     private fun tiersFor(request: StreamRequest): List<String> = when {
         request.wantsAtmos && DeviceCodecs.playsDolbyAtmos -> listOf(
             AddonClient.TIER_ATMOS,
+            AddonClient.TIER_HI_RES,
+            AddonClient.TIER_LOSSLESS,
+            AddonClient.TIER_HIGH,
+        )
+        // The Hi-Res rung asks for the higher-rate master first and takes the
+        // ordinary lossless copy when the catalogue holds no such master.
+        request is StreamRequest.HiRes -> listOf(
             AddonClient.TIER_HI_RES,
             AddonClient.TIER_LOSSLESS,
             AddonClient.TIER_HIGH,
@@ -544,6 +558,7 @@ class AddonSource(
             // and lets the walk below it find the spatial mix.
             is StreamRequest.Atmos -> AddonClient.TIER_LOSSLESS
             is StreamRequest.Lossless -> AddonClient.TIER_LOSSLESS
+            is StreamRequest.HiRes -> AddonClient.TIER_HI_RES
             is StreamRequest.Best -> AddonClient.TIER_HIGH
             is StreamRequest.Capped ->
                 if (maxKbps <= ModuleSource.LOW_CEILING_KBPS) AddonClient.TIER_LOW else AddonClient.TIER_HIGH

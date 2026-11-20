@@ -499,6 +499,9 @@ class ModuleSource(
             // answers it.
             is StreamRequest.Atmos -> LOSSLESS
             is StreamRequest.Lossless -> LOSSLESS
+            // A module's bit-exact tier is its best master; the Hi-Res rung
+            // asks for the same thing and takes what the module offers.
+            is StreamRequest.HiRes -> LOSSLESS
             is StreamRequest.Best -> HIGH
             is StreamRequest.Capped -> if (maxKbps <= LOW_CEILING_KBPS) LOW else HIGH
         }

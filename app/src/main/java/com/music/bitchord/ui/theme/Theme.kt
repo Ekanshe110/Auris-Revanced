@@ -41,6 +41,24 @@ private val DarkColors = darkColorScheme(
     outline = Color(0xFF2C2C2E),
 )
 
+/**
+ * Apple's own accent and surfaces, for the pages that wear Apple's look.
+ *
+ * Apple's Music app is black to the edge, with system blue for anything the
+ * listener can act on — the tab that is selected, the links, the buttons.
+ */
+private val AppleDarkColors = darkColorScheme(
+    primary = Color(0xFF0A84FF),
+    onPrimary = Color.White,
+    background = Color.Black,
+    onBackground = Color.White,
+    surface = Color(0xFF1C1C1E),
+    onSurface = Color.White,
+    surfaceVariant = Color(0xFF2C2C2E),
+    onSurfaceVariant = Color(0xFF8E8E93),
+    outline = Color(0xFF38383A),
+)
+
 private val LightColors = lightColorScheme(
     primary = Color.Black,
     onPrimary = Color.White,
@@ -125,9 +143,18 @@ fun BitChordTheme(
             ScriptFontFamilies()
         }
     }
+    // Apple's look wears Apple's own colours, and only then: an app that is
+    // Auris's keeps Auris's palette.
+    val providerAxes by AppSettings.providerAxes.collectAsStateWithLifecycle()
+    val appleLook =
+        providerAxes.ui == com.music.bitchord.data.settings.MusicProvider.APPLE
     CompositionLocalProvider(LocalScriptFontFamilies provides scriptFamilies) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = when {
+                appleLook && darkTheme -> AppleDarkColors
+                darkTheme -> DarkColors
+                else -> LightColors
+            },
             typography = BitChordTypography.withFamily(family),
             content = content,
         )

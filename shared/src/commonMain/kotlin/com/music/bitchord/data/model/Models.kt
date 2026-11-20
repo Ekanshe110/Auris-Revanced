@@ -143,6 +143,46 @@ data class Song(    val videoId: String,
      * from an artist name, title or genre.
      */
     val genAi: GenAiDisclosure = GenAiDisclosure.NONE,
+    /**
+     * Whether this recording has a Dolby Atmos mix in the catalogue.
+     *
+     * Carried on the row because the player needs to know whether the
+     * "switch to Atmos" cue belongs on this track at all, and that can only be
+     * answered by the catalogue the row came from — the audio flavour is a
+     * property of the master, not of the device playing it.
+     */
+    val atmosAvailable: Boolean = false,
+    /**
+     * Whether this recording has a Hi-Res lossless master (96/192 kHz).
+     *
+     * The ordinary lossless rung is 44.1/48 kHz; the Hi-Res rung is the same
+     * recording at a higher sample rate, and only some masters have one. A
+     * row that says nothing is asked for the standard rung.
+     */
+    val hiResAvailable: Boolean = false,
+    /**
+     * The stream to play, when the row is a live stream rather than a track
+     * the app has to look up.
+     *
+     * Apple's live radio is one continuous encrypted HLS stream, not a song:
+     * its playlist is known before anything is played and there is nothing to
+     * resolve, so the row carries its own address. Null on every ordinary
+     * track.
+     */
+    val liveStreamUrl: String? = null,
+    /**
+     * Where the device trades its Widevine challenge for the live stream's
+     * license. Null on every row that is not a live stream.
+     */
+    val liveLicenseUrl: String? = null,
+    /**
+     * The recording's ISRC, where the row's catalogue states one.
+     *
+     * The only identity that survives a change of provider: Apple, Spotify
+     * and the addons number their own rows, but the ISRC names the recording
+     * itself. A cross-source fallback compares it before any title.
+     */
+    val isrc: String? = null,
 ) {
     /** Legacy derived property: true if and only if [queueTier] is [QueueTier.AUTOPLAY]. */
     val fromAutoplay: Boolean get() = queueTier == QueueTier.AUTOPLAY
@@ -173,6 +213,8 @@ data class Song(    val videoId: String,
         playbackSource: String? = null,
         playbackSourceType: PlaybackSourceType? = null,
         playbackSourceId: String? = null,
+        atmosAvailable: Boolean = false,
+        hiResAvailable: Boolean = false,
     ) : this(
         videoId = videoId,
         title = title,
@@ -199,6 +241,8 @@ data class Song(    val videoId: String,
         playbackSource = playbackSource,
         playbackSourceType = playbackSourceType,
         playbackSourceId = playbackSourceId,
+        atmosAvailable = atmosAvailable,
+        hiResAvailable = hiResAvailable,
     )
 }
 
@@ -347,6 +391,10 @@ enum class PlaybackSourceType {
     BROWSE,
     SHARED_LINK,
     QUEUE,
+    /** A radio station — Apple's own, or any other catalogue's. */
+    RADIO,
+    /** A row of the listener's own library. */
+    LIBRARY,
 }
 
 /** A non-track search result: album, artist or playlist. */
@@ -405,6 +453,53 @@ data class ShelfItem(
      * not a statement about popularity.
      */
     val popularity: Int? = null,
+)
+
+/**
+ * One row of Apple's Radio page.
+ *
+ * A station or a playlist: Apple's page carries both, and the row says which
+ * it is.
+ */
+data class AppleRadioRow(
+    val id: String,
+    val name: String,
+    /** "stations" or "playlists": what the row opens. */
+    val kind: String = "stations",
+    val isLive: Boolean = false,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
+    val provider: String? = null,
+    /** The page the row opens, when it is a page rather than a station. */
+    val browseId: String? = null,
+)
+
+/**
+ * One section of Apple's Radio page: the stations by genre, the sessions,
+ * the mixes, the interviews, the shows.
+ */
+data class AppleRadioShelf(
+    val title: String,
+    val items: List<AppleRadioRow> = emptyList(),
+)
+
+/**
+ * Apple's library, as the page draws it.
+ *
+ * Apple's Library page is not one list: it leads with what was added
+ * recently, then the albums, then the songs, and only then the playlists.
+ * Each of those is the listener's own, so none of them is another
+ * catalogue's.
+ */
+data class AppleLibraryContent(
+    /** The newest playlists, as the tiles at the head of the page. */
+    val recentlyAdded: List<ShelfItem> = emptyList(),
+    /** The listener's albums. */
+    val albums: List<ShelfItem> = emptyList(),
+    /** The listener's songs, as the rows that play. */
+    val songs: List<Song> = emptyList(),
+    /** The listener's playlists. */
+    val playlists: List<ShelfItem> = emptyList(),
 )
 
 /** The signed-in Google account, as YouTube Music reports it. */
@@ -697,6 +792,51 @@ data class UserPlaylist(
 ) {
     val browseId: String get() = "VL$playlistId"
 }
+
+/**
+ * One radio station, as the radio page draws it.
+ *
+ * A station is either a *seeded* station — Apple's own queue of songs, built
+ * from an artist, a genre, a playlist or a song, and playable here — or a
+ * *live* one, which is a continuous stream Apple's own player holds under
+ * Widevine. A live station therefore carries an address to open rather than
+ * audio to play, and the page says so with [isLive] rather than pretending.
+ */
+data class RadioStation(
+    /** The catalogue's own id for the station. */
+    val id: String,
+    /** The station's name, as the catalogue gives it. */
+    val name: String,
+    /** The line under the name — an artist, a genre, a curator. */
+    val subtitle: String? = null,
+    /** The station's artwork. */
+    val artworkUrl: String? = null,
+    /** Whether this is a continuous live stream rather than a song queue. */
+    val isLive: Boolean = false,
+    /**
+     * Where a live station is opened.
+     *
+     * Apple's own page for it, when the catalogue published one. A station
+     * with no address cannot be opened anywhere, and the page says that
+     * rather than offering a tap that goes nowhere.
+     */
+    val deepLink: String? = null,
+    /**
+     * Who broadcasts it.
+     *
+     * Apple's own stations say "Apple Music"; the international ones say who
+     * else runs them. It is what Apple's own page puts under the name.
+     */
+    val provider: String? = null,
+    /**
+     * The page this row opens, when it is a page rather than a station.
+     *
+     * Apple's Radio page carries playlists beside its stations — the
+     * sessions, the mixes, the interviews — and those open as pages of their
+     * own, the way they do in Apple's own app.
+     */
+    val browseId: String? = null,
+)
 
 /**
  * The per-track state that only YouTube can answer: its rating, and whether it

@@ -296,12 +296,10 @@ fun SettingsScreen(
             }
         }
 
-        // The catalogue switch, first thing on the index and still found by
-        // the search there. Not on a category page: it belongs to none of them.
-        if (openCategory == null) {
-            MusicCatalogueSettings(search = search, sheets = sheets)
-        }
-
+        // The catalogue switch lives on the Provider page with the other two
+        // axes. It used to be a card here, which made the index carry one
+        // provider choice while Appearance and Recommendations waited a page
+        // deeper — three answers to one question, split across two screens.
         if (openCategory == null && !searchActive) {
             // The index: one row per category. Each opens a page of its own;
             // the search field above reaches into all of them at once.
@@ -326,6 +324,12 @@ fun SettingsScreen(
                 sheets = sheets,
                 onSources = onSources,
                 onEqualizer = onEqualizer,
+            )
+        }
+        if (shows(SettingsCategory.PROVIDER)) {
+            ProviderSettings(
+                search = search,
+                sheets = sheets,
             )
         }
         if (shows(SettingsCategory.PLAYBACK)) {
@@ -962,6 +966,7 @@ private val SettingsCategory.icon: ImageVector
         SettingsCategory.ACCOUNT -> Icons.Rounded.Person
         SettingsCategory.AUDIO -> Icons.Rounded.GraphicEq
         SettingsCategory.PLAYBACK -> Icons.Rounded.PlayArrow
+        SettingsCategory.PROVIDER -> Icons.Rounded.MusicNote
         SettingsCategory.DOWNLOADS -> Icons.Rounded.Download
         SettingsCategory.NOW_PLAYING -> Icons.Rounded.MusicNote
         SettingsCategory.HOME_LIBRARY -> Icons.Rounded.Home

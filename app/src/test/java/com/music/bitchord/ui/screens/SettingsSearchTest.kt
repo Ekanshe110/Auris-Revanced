@@ -38,21 +38,21 @@ class SettingsSearchTest {
     }
 
     @Test
-    fun `the catalogue switch answers to the words people search for`() {
-        // The words the row answered to under Playback, plus the ones its
-        // new home adds. Typing any of them must still turn it up.
+    fun `the source row answers to the words people search for`() {
+        // The catalogue switch sits on the Provider page now, so a service
+        // name typed into the settings search has to reach it there.
         listOf(
-            "provider", "spotify", "youtube", "search", "library",
-            "Spotify", "YouTube Music", "catalogue", "catalog", "source",
+            "spotify", "youtube", "youtube music", "apple music",
+            "Spotify", "YouTube Music", "catalogue", "source",
         ).forEach { query ->
             val search = SettingsSearch(query)
-            assertTrue(query, search.matches("Spotify or YouTube Music", *MUSIC_CATALOGUE_KEYWORDS))
+            assertTrue(query, search.matches("Source", *PROVIDER_SOURCE_KEYWORDS))
         }
     }
 
     @Test
-    fun `the catalogue switch keeps out of unrelated searches`() {
+    fun `the source row keeps out of unrelated searches`() {
         val search = SettingsSearch("equalizer")
-        assertFalse(search.matches("Spotify or YouTube Music", *MUSIC_CATALOGUE_KEYWORDS))
+        assertFalse(search.matches("Source", *PROVIDER_SOURCE_KEYWORDS))
     }
 }

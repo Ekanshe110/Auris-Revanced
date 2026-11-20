@@ -52,6 +52,8 @@ object TrackMatcher {
         val isExplicit: Boolean? = null,
         /** Music-video timing includes visual intros/outros that catalogue audio omits. */
         val isVideo: Boolean = false,
+        /** The recording's ISRC, when the queue row knew one. */
+        val isrc: String? = null,
     )
 
     fun targetOf(song: Song) = Target(
@@ -61,6 +63,7 @@ object TrackMatcher {
         song.albumName,
         song.isExplicit,
         song.isVideo,
+        song.isrc,
     )
 
     // ── Asking ──────────────────────────────────────────────────────────────
@@ -238,6 +241,14 @@ object TrackMatcher {
      * track — still plays what the user asked for.
      */
     fun score(candidate: Song, target: Target): Int? {
+        // The ISRC is the recording itself. When both rows state one, that is
+        // the answer and no title heuristics are needed — two catalogues
+        // spelling the same master differently is the case this exists for.
+        // A mismatch is not a rejection: editions and regions mint their own
+        // ISRCs for the same master, so the ordinary checks still run.
+        val wantedIsrc = target.isrc?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        val gotIsrc = candidate.isrc?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        if (wantedIsrc != null && wantedIsrc == gotIsrc) return ISRC_MATCH_SCORE
         val wanted = parseTitle(target.title, target.artist)
         val got = parseTitle(candidate.title, candidate.artist)
         if (wanted.core.isBlank() || got.core.isBlank()) return null
@@ -815,6 +826,13 @@ object TrackMatcher {
 
     /** Everything that reaches scoring has already matched on title and version. */
     private const val BASE = 100
+
+    /**
+     * The score an ISRC agreement carries. Above every combination of title,
+     * artist, runtime, album and edition points, so a candidate that states
+     * the same recording wins outright instead of competing on spelling.
+     */
+    private const val ISRC_MATCH_SCORE = 10_000
     private const val ARTIST_EXACT = 25
     private const val ARTIST_SHARED = 10
 

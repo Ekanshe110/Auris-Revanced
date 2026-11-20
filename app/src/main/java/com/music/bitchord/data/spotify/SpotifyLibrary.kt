@@ -39,6 +39,11 @@ data class SpotifyTrack(
     val album: String?,
     val durationMs: Int,
     val imageUrl: String?,
+    /**
+     * The recording's ISRC when the answering endpoint states one. The
+     * web-player shapes rarely do; the Web API shape does.
+     */
+    val isrc: String? = null,
 )
 
 object SpotifyLibrary {

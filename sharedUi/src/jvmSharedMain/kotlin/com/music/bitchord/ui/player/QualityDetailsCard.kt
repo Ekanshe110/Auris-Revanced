@@ -31,16 +31,18 @@ import com.music.bitchord.data.NerdStats
  * What the quality badge is actually telling you.
  *
  * "Lossless" is a claim; this is the measurement behind it: where the bytes
- * came from, how many of them there were, and what they are wrapped in. Shown
- * over the player rather than in a dialog: the badge is the thing that was
- * tapped, and the answer belongs next to the question.
+ * came from, how many of them there were, and what they are wrapped in.
+ *
+ * It is opened from the player's own menu rather than from a tap on the
+ * badge: the badge is the switch between renditions now, and a tap that meant
+ * two different things meant neither.
  *
  * Text is deliberately NOT the album-art ink: on a bright sleeve the ink is
  * unreadable, so the card uses fixed high-contrast colors on its own dark
  * surface and pops in from the badge with a spring.
  */
 @Composable
-internal fun QualityDetailsCard(
+fun QualityDetailsCard(
     stats: NerdStats.Snapshot,
     modifier: Modifier = Modifier,
 ) {

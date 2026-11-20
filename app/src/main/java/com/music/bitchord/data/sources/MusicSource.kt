@@ -92,6 +92,17 @@ sealed interface StreamRequest {
      */
     data object Atmos : StreamRequest
 
+    /**
+     * The Hi-Res lossless master: the same recording as [Lossless], but at
+     * 96/192 kHz rather than 44.1/48 kHz.
+     *
+     * Its own rung because the answer is a different file from the standard
+     * lossless one, and because only some masters have one at all — a source
+     * asked for Hi-Res and holding none falls back down the bit-exact ladder
+     * rather than refusing the track.
+     */
+    data object HiRes : StreamRequest
+
     /** A transcode at or below [maxKbps]. What a metered connection asks for. */
     data class Capped(val maxKbps: Int) : StreamRequest
 
@@ -106,7 +117,7 @@ sealed interface StreamRequest {
      * can only offer a FLAC is still the right source to ask.
      */
     val wantsLossless: Boolean
-        get() = this is Lossless || this is Atmos
+        get() = this is Lossless || this is Atmos || this is HiRes
 
     /**
      * Whether an immersive answer is wanted.

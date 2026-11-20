@@ -197,6 +197,8 @@ internal object SpotifyWebApi {
             durationMs = item["duration_ms"]?.jsonPrimitive?.intOrNull ?: 0,
             imageUrl = item["album"]?.jsonObject?.get("images")?.asArray()?.firstImage()
                 ?: item["images"]?.asArray()?.firstImage(),
+            isrc = item["external_ids"]?.jsonObject?.text("isrc")
+                ?.takeIf { it.isNotBlank() },
         )
     }
 

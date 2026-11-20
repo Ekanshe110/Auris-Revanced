@@ -449,6 +449,7 @@ internal object SpotifyHomeSource {
                 "%d:%02d".format(total / 60, total % 60)
             },
             albumName = track.album,
+            isrc = track.isrc,
         )
     }
 

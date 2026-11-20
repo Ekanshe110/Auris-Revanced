@@ -303,4 +303,13 @@
     <string name="library_search_hint">Search this</string>
     <string name="library_empty_segment">Nothing here yet</string>
     <string name="home_chip_all">All</string>
+    <string name="apple_albums">Albums</string>
+    <string name="apple_international_broadcasters">International Broadcasters</string>
+    <string name="apple_on_air_now">On Air Now</string>
+    <string name="apple_playlists">Playlists</string>
+    <string name="apple_recently_added">Recently Added</string>
+    <string name="apple_songs">Songs</string>
+    <string name="apple_stations_by_genre">Stations by Genre</string>
+    <string name="live">LIVE</string>
+    <string name="more_to_explore">More to Explore</string>
 </resources>

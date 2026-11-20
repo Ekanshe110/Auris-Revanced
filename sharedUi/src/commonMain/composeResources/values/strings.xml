@@ -204,6 +204,8 @@
     <string name="podcasts_empty">No podcasts yet. Follow a show on YouTube Music and it shows up here.</string>
     <string name="your_shows">Your shows</string>
     <string name="library">Library</string>
+    <string name="more_to_explore">More to Explore</string>
+    <string name="live">LIVE</string>
     <string name="library_sign_in_description">Sign in to your Google account to see your liked songs, playlists, and YouTube Music history.</string>
     <string name="new_playlist">New playlist</string>
     <string name="new_folder">New folder</string>
@@ -303,4 +305,11 @@
     <string name="queue_suggest_album">From album</string>
     <string name="queue_search_nothing_here">Nothing here yet</string>
     <string name="home_chip_all">All</string>
+    <string name="apple_recently_added">Recently Added</string>
+    <string name="apple_albums">Albums</string>
+    <string name="apple_songs">Songs</string>
+    <string name="apple_playlists">Playlists</string>
+    <string name="apple_stations_by_genre">Stations by Genre</string>
+    <string name="apple_on_air_now">On Air Now</string>
+    <string name="apple_international_broadcasters">International Broadcasters</string>
 </resources>

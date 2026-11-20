@@ -11,10 +11,18 @@ on:
       - '.github/**'
       - '**.md'
   pull_request:
+  # A run can be started for a branch on demand, which is also how a change
+  # to this file is checked: the paths above deliberately skip it on push.
+  workflow_dispatch:
 
+# One run per commit, not one per branch. A new push no longer cancels the
+# run that is already going: the two build side by side, so the result for
+# the newest commit arrives while the previous one is still finishing,
+# instead of waiting for it in a queue. The cost is runner minutes — the
+# only currency a private repository's CI spends.
 concurrency:
-  group: check-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: check-${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   desktop-linux:

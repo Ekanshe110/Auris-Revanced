@@ -201,6 +201,15 @@ object LastPlayed {
         val source: String? = null,
         val sourceType: String? = null,
         val sourceId: String? = null,
+        /**
+         * A live station's own address and its license endpoint.
+         *
+         * Kept because a restored queue has to be able to play the station
+         * again: without them the row would come back as a track with nothing
+         * to play.
+         */
+        val liveStream: String? = null,
+        val liveLicense: String? = null,
     ) {
         fun toSong(): Song {
             val resolvedTier = when (tier) {
@@ -228,6 +237,8 @@ object LastPlayed {
                 playbackSourceId = sourceId,
                 localUri = local,
                 localPath = path,
+                liveStreamUrl = liveStream,
+                liveLicenseUrl = liveLicense,
             )
         }
 
@@ -250,6 +261,8 @@ object LastPlayed {
                 source = song.playbackSource,
                 sourceType = song.playbackSourceType?.name,
                 sourceId = song.playbackSourceId,
+                liveStream = song.liveStreamUrl,
+                liveLicense = song.liveLicenseUrl,
             )
         }
     }

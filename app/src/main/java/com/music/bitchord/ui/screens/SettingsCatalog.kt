@@ -30,6 +30,7 @@ enum class SettingsCategory(
     ACCOUNT("account", R.string.settings_category_account),
     AUDIO("audio", R.string.settings_category_audio),
     PLAYBACK("playback", R.string.settings_category_playback),
+    PROVIDER("provider", R.string.settings_category_provider),
     DOWNLOADS("downloads", R.string.settings_category_downloads),
     NOW_PLAYING("now_playing", R.string.settings_category_now_playing),
     HOME_LIBRARY("home_library", R.string.settings_category_home_library),
@@ -84,6 +85,12 @@ object SettingsCatalog {
             "audio.auto_upgrade_local_storage",
             "audio.equalizer",
             "audio.jamesdsp",
+        ),
+        SettingsCategory.PROVIDER to listOf(
+            "provider.apple_master",
+            "provider.ui",
+            "provider.recommendation",
+            "provider.source",
         ),
         SettingsCategory.PLAYBACK to listOf(
             "playback.prefer_music_only",

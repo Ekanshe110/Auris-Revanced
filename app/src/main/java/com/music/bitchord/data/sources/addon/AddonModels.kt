@@ -72,7 +72,32 @@ data class AddonManifest(
      * Read through [requiresLosslessOutput].
      */
     @SerialName("checkValidLossless") val checkValidLossless: JsonElement? = null,
+    /**
+     * `catalogueProvider` — which catalogue this addon serves, when it says.
+     *
+     * An addon that publishes `apple-music` is an Apple Music manifest: the
+     * one kind of addon that also publishes a library, a home page and radio
+     * stations. Read as a plain string rather than as a nested object
+     * because that is the only shape any addon has used it in.
+     */
+    @SerialName("catalogueProvider") val catalogueProvider: String? = null,
+    /**
+     * `library` — the library collections this addon publishes, when it
+     * publishes any.
+     *
+     * Only the collection names are read. The rest of the block describes
+     * how a host should authenticate, and this app never authenticates to an
+     * addon: the addon holds the account itself.
+     */
+    @SerialName("library") val library: AddonLibraryDeclaration? = null,
 ) {
+    /**
+     * The catalogue this addon serves, as it was published.
+     *
+     * Kept as the raw string so the Apple check can be made against the
+     * manifest rather than against the addon's name or address.
+     */
+    val rawCatalogueProvider: String? get() = catalogueProvider
     val downloadsAllowed: Boolean get() = allowDownloads.asFlag() ?: true
 
     val requiresLosslessOutput: Boolean get() = checkValidLossless.asFlag() ?: false
@@ -97,6 +122,18 @@ data class AddonManifest(
     /** What to show when the user did not name the addon themselves. */
     val displayName: String get() = name.ifBlank { id }
 }
+
+/**
+ * The `library` block of a manifest, reduced to what this app reads.
+ *
+ * Only the collection names matter here: an Apple Music manifest publishes
+ * `playlists`, `albums` and `songs`, and the app asks for those by name.
+ */
+@Serializable
+data class AddonLibraryDeclaration(
+    @SerialName("provider") val provider: String? = null,
+    @SerialName("collections") val collections: List<String> = emptyList(),
+)
 
 /**
  * One declared setting, reduced to the things this app does with it.
@@ -159,6 +196,8 @@ data class AddonTrack(
     /** Seconds. Read as a double so an addon sending `240.0` is not a parse failure. */
     @SerialName("duration") val duration: Double? = null,
     @SerialName("artworkURL") val artworkURL: String? = null,
+    /** The recording's ISRC, when the addon states one. */
+    @SerialName("isrc") val isrc: String? = null,
     @SerialName("albumArtworkURL") val albumArtworkURL: String? = null,
     /** `mp3`, `flac`, `aac`, `m4a` — what the row is, when the addon says. */
     @SerialName("format") val format: String = "",
@@ -209,7 +248,28 @@ data class AddonTrack(
         get() = atmos == true || ATMOS_HINT.containsMatchIn(
             "$audioQuality ${audioMode.orEmpty()} ${audioModes.joinToString(" ")} $format",
         )
+
+    /**
+     * Whether this row is a Hi-Res lossless master — 96/192 kHz rather than
+     * 44.1/48 kHz.
+     *
+     * Read from the free-text quality label, because that is where the
+     * catalogues put it: `HI-RES LOSSLESS`, `hires`, `24-bit` and `96kHz` all
+     * mean the same thing to the player.
+     */
+    val isHiResLossless: Boolean
+        get() = HI_RES_HINT.containsMatchIn(
+            "$audioQuality ${audioMode.orEmpty()} ${audioModes.joinToString(" ")} $format",
+        )
 }
+
+/**
+ * The spellings an addon uses for a Hi-Res lossless master.
+ */
+private val HI_RES_HINT = Regex(
+    """hi[-_ ]?res|hires|24[- ]?bit|\b96\s?k|\b192\s?k""",
+    RegexOption.IGNORE_CASE,
+)
 
 /**
  * The spellings an addon uses for an immersive mix, in any free-text field.

@@ -349,6 +349,213 @@ object AppSettings {
     val homeProvider = MutableStateFlow(HomeProvider.YOUTUBE)
 
     /**
+     * The three provider axes, and what each one owns.
+     *
+     *  - [ProviderAxis.UI] — the look: which catalogue's design the screens
+     *    wear. Apple's layout over YouTube's rows is still YouTube's rows.
+     *  - [ProviderAxis.RECOMMENDATION] — the algorithm: what Home, Flow and
+     *    Autoplay suggest. It never decides where the audio comes from.
+     *  - [ProviderAxis.SOURCE] — the content: songs, metadata, lyrics and
+     *    artwork, and with them the catalogue id a track is known by.
+     *
+     * They are separate because every combination of them is legal, and
+     * because a listener who wants Apple's catalogue but Spotify's
+     * recommendations should not have to give either up.
+     *
+     * The master switch lives in the settings, not here: turning the whole
+     * app to Apple is three writes, one per axis.
+     */
+    val providerAxes = MutableStateFlow(
+        ProviderAxes(
+            ui = MusicProvider.YOUTUBE,
+            recommendation = MusicProvider.YOUTUBE,
+            source = MusicProvider.YOUTUBE,
+        ),
+    )
+
+    /**
+     * The provider on one axis.
+     *
+     * Read through this rather than through [providerAxes] where a single
+     * axis is meant: it is the only place the three are kept in step.
+     */
+    fun providerOn(axis: ProviderAxis): MusicProvider =
+        when (axis) {
+            ProviderAxis.UI -> providerAxes.value.ui
+            ProviderAxis.RECOMMENDATION -> providerAxes.value.recommendation
+            ProviderAxis.SOURCE -> providerAxes.value.source
+        }
+
+    /**
+     * Points one axis at a provider.
+     *
+     * Only that axis changes. The other two are left exactly as they were,
+     * which is the whole point of having three.
+     *
+     * Apple is the one exception: it is read through an installed Apple
+     * Music manifest, and without one there is nothing to read. An axis is
+     * therefore never pointed at Apple when the app already knows there is no
+     * manifest — a switch that promises Apple's catalogue and cannot deliver
+     * it is worse than one that refuses.
+     */
+    fun setProviderOn(axis: ProviderAxis, provider: MusicProvider) {
+        if (!appleAllowed(provider)) return
+        val current = providerAxes.value
+        val updated = when (axis) {
+            ProviderAxis.UI -> current.copy(ui = provider)
+            ProviderAxis.RECOMMENDATION -> current.copy(recommendation = provider)
+            ProviderAxis.SOURCE -> current.copy(source = provider)
+        }
+        if (updated == current) return
+        providerAxes.value = updated
+        persistProviderAxes(updated)
+        // The recommendation axis names the catalogue Home is drawn from, and
+        // the older single setting is what the rest of the app still reads.
+        // The two are kept in step, so a page cannot be YouTube's while the
+        // axes say Spotify's.
+        if (axis == ProviderAxis.RECOMMENDATION) {
+            mirrorCatalogue(provider)
+        }
+    }
+
+    /**
+     * Points the catalogue at a service, in the two axes that name one.
+     *
+     * Upstream's catalogue card chooses the service that Home and Search come
+     * from. In this app that is two axes — recommendations and source — so
+     * both are pointed at it, and the older single setting follows.
+     */
+    fun setCatalogue(provider: MusicProvider) {
+        if (!appleAllowed(provider)) return
+        val current = providerAxes.value
+        val updated = current.copy(recommendation = provider, source = provider)
+        if (updated != current) {
+            providerAxes.value = updated
+            persistProviderAxes(updated)
+        }
+        mirrorCatalogue(provider)
+    }
+
+    /**
+     * Keeps the older single-catalogue setting in step with an axis.
+     *
+     * Apple is left alone: Flow and Autoplay are YouTube Music's whichever
+     * catalogue is chosen, and that training belongs to the last service the
+     * listener actually used.
+     */
+    private fun mirrorCatalogue(provider: MusicProvider) {
+        when (provider) {
+            MusicProvider.YOUTUBE -> if (homeProvider.value != HomeProvider.YOUTUBE) {
+                setHomeProvider(HomeProvider.YOUTUBE)
+            }
+            MusicProvider.SPOTIFY -> if (homeProvider.value != HomeProvider.SPOTIFY) {
+                setHomeProvider(HomeProvider.SPOTIFY)
+            }
+            MusicProvider.APPLE -> Unit
+        }
+    }
+
+    /**
+     * Points every axis at Apple Music — the master switch.
+     *
+     * One write, three axes: the listener asked for the whole app to be
+     * Apple's, and the app does not decide that only some of it may be.
+     */
+    fun setAllProviders(provider: MusicProvider) {
+        if (!appleAllowed(provider)) return
+        val updated = ProviderAxes(
+            ui = provider,
+            recommendation = provider,
+            source = provider,
+        )
+        if (updated == providerAxes.value) return
+        providerAxes.value = updated
+        persistProviderAxes(updated)
+        mirrorCatalogue(provider)
+    }
+
+    /**
+     * Whether an axis may be pointed at this provider.
+     *
+     * Apple is read through an installed Apple Music manifest, so it is only
+     * offered when there is one. An unknown answer — the app has not looked
+     * yet — is allowed through: a listener who installs the addon and turns
+     * Apple on straight away must not be refused because the app had not
+     * been asked.
+     */
+    private fun appleAllowed(provider: MusicProvider): Boolean {
+        if (provider != MusicProvider.APPLE) return true
+        return com.music.bitchord.data.apple.AppleManifestLocator.isInstalledKnown() != false
+    }
+
+    /**
+     * Whether every axis points at Apple Music.
+     *
+     * This is what the master switch shows, and what the Apple screens are
+     * drawn for.
+     */
+    val appleMasterOn: Boolean
+        get() = providerAxes.value.ui == MusicProvider.APPLE &&
+            providerAxes.value.recommendation == MusicProvider.APPLE &&
+            providerAxes.value.source == MusicProvider.APPLE
+
+    /** Whether the screens wear Apple's look. */
+    val appleUiSelected: Boolean
+        get() = providerAxes.value.ui == MusicProvider.APPLE
+
+    /** Whether discovery comes from Apple's algorithm. */
+    val appleRecommendationSelected: Boolean
+        get() = providerAxes.value.recommendation == MusicProvider.APPLE
+
+    /** Whether songs, metadata, lyrics and artwork come from Apple. */
+    val appleSourceSelected: Boolean
+        get() = providerAxes.value.source == MusicProvider.APPLE
+
+    /**
+     * Writes the three axes to the preferences.
+     *
+     * Committed rather than applied, because the caller may restart the
+     * process immediately afterwards and an async write that has not reached
+     * disk when the process dies is a switch that reports success and comes
+     * back on the old value.
+     */
+    /**
+     * The old single-provider choice, read as a provider id.
+     *
+     * The preference that predates the three axes stored an enum name:
+     * `YOUTUBE` or `SPOTIFY`. Reading it as a provider id keeps the
+     * listener's catalogue choice when the axes are first written.
+     */
+    private fun legacyProviderId(name: String?): String? = when (name) {
+        null -> null
+        "YOUTUBE" -> MusicProvider.YOUTUBE.id
+        "SPOTIFY" -> MusicProvider.SPOTIFY.id
+        "APPLE" -> MusicProvider.APPLE.id
+        else -> null
+    }
+
+    /**
+     * Keeps the app to Apple's own catalogue, or lets it be as wide as it was.
+     *
+     * Written straight to disk: the switch changes what may be played, and a
+     * value that had not reached the disk when the process died would be a
+     * rule that came back off.
+     */
+    fun setAppleOnlyCatalogue(only: Boolean) {
+        if (appleOnlyCatalogue.value == only) return
+        appleOnlyCatalogue.value = only
+        prefs.edit().putBoolean(KEY_APPLE_ONLY_CATALOGUE, only).commit()
+    }
+
+    private fun persistProviderAxes(axes: ProviderAxes) {
+        prefs.edit()
+            .putString(KEY_PROVIDER_UI, axes.ui.id)
+            .putString(KEY_PROVIDER_RECOMMENDATION, axes.recommendation.id)
+            .putString(KEY_PROVIDER_SOURCE, axes.source.id)
+            .commit()
+    }
+
+    /**
      * The transition planner Automix runs.
      *
      * Pinned to the phrase-aware engine: the legacy plan it replaced is gone,
@@ -757,8 +964,34 @@ object AppSettings {
      *
      * The switch is there for the listener who never wanted podcasts and
      * would rather not have the app carry them at all.
+     *
+     * Off by default: this build is a music app first, and a podcast tab
+     * that is on before anyone asked for it is a tab nobody wanted. It is
+     * one switch away from being on.
      */
-    val podcastsEnabled = MutableStateFlow(true)
+    val podcastsEnabled = MutableStateFlow(false)
+
+    /**
+     * Only what is in Apple's own catalogue is kept.
+     *
+     * Apple's Music app is a catalogue app: what it plays is what Apple
+     * holds. This is that rule, as a switch, for a listener who wants the
+     * app to be Apple's rather than Apple's look over somebody else's rows:
+     * a track that is not in Apple's catalogue is not played and not offered,
+     * whatever else could have played it.
+     *
+     * Off by default. It is a choice about what the app is allowed to do, not
+     * about how it looks, so it is not implied by the Apple look.
+     */
+    val appleOnlyCatalogue = MutableStateFlow(false)
+
+    /**
+     * Whether the Apple look is on *and* the app is kept to Apple's
+     * catalogue. The switch is only offered under the Apple master toggle,
+     * so this is what the app reads.
+     */
+    val appleCatalogueOnly: Boolean
+        get() = appleOnlyCatalogue.value && appleMasterOn
 
     /**
      * How strong the [liquidGlass] material is,
@@ -1587,6 +1820,21 @@ object AppSettings {
         // An unknown name lands on YouTube rather than on nothing: the provider
         // a listener never chose is the one that works without an account.
         homeProvider.value = HomeProvider.of(prefs.getString(KEY_HOME_PROVIDER, null))
+        // The three provider axes. An install that has them keeps them; an
+        // install that only has the old single provider keeps that choice on
+        // the source and recommendation axes, and starts on the default look
+        // — the old switch chose a catalogue, and a catalogue is not a skin.
+        providerAxes.value = ProviderAxes(
+            ui = MusicProvider.of(prefs.getString(KEY_PROVIDER_UI, null)),
+            recommendation = MusicProvider.of(
+                prefs.getString(KEY_PROVIDER_RECOMMENDATION, null)
+                    ?: legacyProviderId(prefs.getString(KEY_HOME_PROVIDER, null)),
+            ),
+            source = MusicProvider.of(
+                prefs.getString(KEY_PROVIDER_SOURCE, null)
+                    ?: legacyProviderId(prefs.getString(KEY_HOME_PROVIDER, null)),
+            ),
+        )
         // An install that still has the removed engine's name in its
         // preferences fails the lookup and lands on the one engine there is.
         automixEngine.value = runCatching {
@@ -1698,7 +1946,8 @@ object AppSettings {
         reduceDynamicBlur.value = prefs.getBoolean(KEY_REDUCE_BLUR, lowEndDevice)
         liquidGlass.value = prefs.getBoolean(KEY_LIQUID_GLASS, false)
         foldingNavBar.value = prefs.getBoolean(KEY_FOLDING_NAV_BAR, true)
-        podcastsEnabled.value = prefs.getBoolean(KEY_PODCASTS_ENABLED, true)
+        podcastsEnabled.value = prefs.getBoolean(KEY_PODCASTS_ENABLED, false)
+        appleOnlyCatalogue.value = prefs.getBoolean(KEY_APPLE_ONLY_CATALOGUE, false)
         liquidGlassIntensity.value = prefs.getFloat(KEY_LIQUID_GLASS_INTENSITY, 1f)
             .coerceIn(MIN_LIQUID_GLASS_INTENSITY, MAX_LIQUID_GLASS_INTENSITY)
         glassPerformance.value = prefs.getBoolean(KEY_GLASS_PERFORMANCE, false)
@@ -3249,6 +3498,15 @@ object AppSettings {
     private const val KEY_AUTO_UPGRADE_LOCAL_STORAGE = "auto_upgrade_local_storage"
     private const val KEY_AUTOMIX_PERFORMANCE_MODE = "automix_performance_mode"
     private const val KEY_HOME_PROVIDER = "home_provider"
+
+    /** The catalogue look axis. */
+    private const val KEY_PROVIDER_UI = "provider_ui"
+
+    /** The discovery algorithm axis. */
+    private const val KEY_PROVIDER_RECOMMENDATION = "provider_recommendation"
+
+    /** The content source axis. */
+    private const val KEY_PROVIDER_SOURCE = "provider_source"
     private const val KEY_AUTOMIX_ENGINE = "automix_engine"
     private const val KEY_SKIP_SILENCE = "skip_silence"
     private const val KEY_OUTPUT_PCM_MODE = "output_pcm_mode"
@@ -3337,6 +3595,8 @@ object AppSettings {
     private const val KEY_LIQUID_GLASS = "liquid_glass"
     private const val KEY_GLASS_PERFORMANCE = "glass_performance"
     private const val KEY_FOLDING_NAV_BAR = "folding_nav_bar"
+    private const val KEY_APPLE_ONLY_CATALOGUE = "apple_only_catalogue"
+
     private const val KEY_PODCASTS_ENABLED = "podcasts_enabled"
     private const val KEY_LIQUID_GLASS_INTENSITY = "liquid_glass_intensity"
     private const val KEY_LYRICS_BLUR = "lyrics_blur"

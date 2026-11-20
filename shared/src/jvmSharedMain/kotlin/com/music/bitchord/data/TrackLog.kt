@@ -161,6 +161,26 @@ object TrackLog {
         }
     }
 
+    /**
+     * The lines the app has logged, newest last.
+     *
+     * For a report a listener can send: the app's own record of what it did,
+     * which is the half of the story that says what the app was doing. The
+     * system's own log says what the device was doing, and the two together
+     * are a diagnosis.
+     */
+    fun recentLines(limit: Int = 600): List<String> {
+        val take = limit.coerceAtLeast(1)
+        synchronized(lines) {
+            return lines.takeLast(take).map { line ->
+                val at = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US)
+                    .format(java.util.Date(line.at))
+                val track = line.track?.let { " [$it]" } ?: ""
+                "$at ${line.level}$track ${line.text}"
+            }
+        }
+    }
+
     // ── Reading ─────────────────────────────────────────────────────────────
 
     /**

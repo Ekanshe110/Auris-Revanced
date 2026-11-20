@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Auris</string>
+    <string name="app_name">Appix</string>
     <string name="automix_analysis_menu">Анализ Automix</string>
     <string name="playback_channel_name">Сейчас играет</string>
     <string name="download_channel_name">Загрузки</string>
@@ -1651,4 +1651,42 @@
     <string name="podcasts_enabled_subtitle">Turn off the tab, the shelves and the search filter. Downloads already on the device stay.</string>
     <string name="hide_status_bar_in_player">Hide status bar in player</string>
     <string name="hide_status_bar_in_player_subtitle">Hides the clock, battery and notification icons while the main player is open</string>
+    <string name="settings_category_provider">Provider</string>
+    <string name="provider_footer">The three axes are independent: any mix of them works. Apple is read through an installed Apple Music manifest, never from inside the app.</string>
+    <string name="provider_apple_master">Apple Music everywhere</string>
+    <string name="provider_apple_master_subtitle">Points the look, the recommendations and the catalogue at Apple Music in one tap.</string>
+    <string name="provider_axis_ui">Appearance</string>
+    <string name="provider_axis_ui_subtitle">Which catalogue\'s design the screens wear. The outer look only.</string>
+    <string name="provider_axis_recommendation">Recommendations</string>
+    <string name="provider_axis_recommendation_subtitle">Which algorithm builds Home, Flow and Autoplay. What is suggested, not where it comes from.</string>
+    <string name="provider_axis_source">Source</string>
+    <string name="provider_axis_source_subtitle">Where songs, metadata, lyrics and artwork come from — and which catalogue id a track is known by.</string>
+    <string name="provider_apple">Apple Music</string>
+    <string name="provider_youtube_subtitle">YouTube Music\'s own catalogue and its feed for Home, Flow and Autoplay.</string>
+    <string name="provider_spotify_subtitle">Spotify\'s own catalogue and its own discovery. Needs a Spotify sign-in.</string>
+    <string name="provider_apple_subtitle">Apple Music\'s own catalogue, discovery and library, read through an installed Apple Music manifest.</string>
+    <string name="provider_apple_manifest_missing_title">No Apple Music manifest installed</string>
+    <string name="provider_apple_manifest_missing_subtitle">Install an Apple Music manifest on the Sources screen. Until one is installed, Apple cannot answer anything.</string>
+    <string name="apple_home_empty">Apple Music returned nothing to show</string>
+    <string name="apple_radio_empty">Apple Music returned no stations</string>
+    <string name="apple_radio_unplayable">This station cannot be played right now</string>
+    <string name="apple_browse_empty">Apple Music returned nothing to browse</string>
+    <string name="stop">Stop</string>
+    <string name="provider_apple_only_catalogue">Only Apple Music tracks</string>
+    <string name="atmos_not_supported">This device cannot play Dolby Atmos</string>
+    <string name="system_log_title">System log</string>
+    <string name="system_log_subtitle">A detailed report of what the app did, what it cost and what the system said — send it when something is wrong</string>
+    <string name="system_log_copy">Copy</string>
+    <string name="system_log_share">Share</string>
+    <string name="system_log_with_system">Without the system log</string>
+    <string name="system_log_without_system">With the system log</string>
+    <string name="system_log_working">Gathering the report…</string>
+    <string name="apple_only_catalogue_nothing">None of these are in Apple Music</string>
+    <string name="provider_apple_only_catalogue_subtitle">Play and offer only what is in Apple Music\'s catalogue</string>
+    <string name="apple_new_tab">New</string>
+    <string name="apple_library_empty">Your Apple Music library has no playlists in it</string>
+    <plurals name="apple_only_catalogue_dropped">
+        <item quantity="one">%d track is not in Apple Music and was left out</item>
+        <item quantity="other">%d tracks are not in Apple Music and were left out</item>
+    </plurals>
 </resources>

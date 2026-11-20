@@ -5,9 +5,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.R
@@ -53,6 +57,21 @@ internal fun DataSettings(
                 },
                 onClick = { AppSettings.setReplayGenres(!replayGenres) },
             )
+        }
+        // The report a listener can send when something is wrong: the app's
+        // own log, what it cost, and the system's own account of it.
+        val systemLogTitle = stringResource(R.string.system_log_title)
+        var showSystemLog by remember { mutableStateOf(false) }
+        row(systemLogTitle, "log", "diagnostics", "bug", "report", "crash") {
+            SettingsRow(
+                icon = Icons.Rounded.BugReport,
+                title = systemLogTitle,
+                subtitle = stringResource(R.string.system_log_subtitle),
+                onClick = { showSystemLog = true },
+            )
+        }
+        if (showSystemLog) {
+            SystemLogSheet(onDismiss = { showSystemLog = false })
         }
         val exportDataTitle = stringResource(R.string.export_data)
         row(exportDataTitle, "backup") {

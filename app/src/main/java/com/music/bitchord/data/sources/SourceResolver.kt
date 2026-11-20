@@ -44,6 +44,16 @@ object SourceResolver {
     private const val TAG = "BitChord"
 
     /**
+     * The query parameter that names the rendition a track is opened at.
+     *
+     * `atmos`, `hires` or `lossless`. It rides on the item's URI rather than
+     * in a setting, because the choice is per track and has to survive the
+     * hand-over to the service — see
+     * [PlaybackService.switchCurrentRendition][com.music.bitchord.playback.PlaybackService].
+     */
+    private const val RENDITION_PARAM = "rend"
+
+    /**
      * What to ask a source for, right now.
      *
      * The lossless switch is a preference, not an override — it loses to the
@@ -156,10 +166,20 @@ object SourceResolver {
     suspend fun resolve(uri: Uri): SourceStream? {
         val configId = uri.getQueryParameter("s") ?: return null
         val trackId = uri.getQueryParameter("t") ?: return null
+        // The rendition the listener asked for rides on the URI, so the
+        // resolver, the disk cache and the service all agree on which file
+        // this is. Absent the parameter the ordinary setting answers.
+        val request = when (uri.getQueryParameter(RENDITION_PARAM)) {
+            "atmos" -> if (DeviceCodecs.playsDolbyAtmos) StreamRequest.Atmos else StreamRequest.Lossless
+            "hires" -> StreamRequest.HiRes
+            "lossless" -> StreamRequest.Lossless
+            else -> null
+        }
         return resolve(
             configId = configId,
             trackId = trackId,
             target = targetIn(uri),
+            request = request,
         )
     }
 
@@ -178,6 +198,7 @@ object SourceResolver {
         album = uri.getQueryParameter("l"),
         isExplicit = uri.getQueryParameter("e")?.let { it == "1" },
         isVideo = uri.getQueryParameter("m") == "1",
+        isrc = uri.getQueryParameter("i")?.takeIf { it.isNotBlank() },
     )
 
     /**
@@ -189,8 +210,9 @@ object SourceResolver {
         configId: String,
         trackId: String,
         target: TrackMatcher.Target,
+        request: StreamRequest? = null,
     ): SourceStream? {
-        val request = requestForNow()
+        val request = request ?: requestForNow()
         val active = SourceRegistry.activeForPlayback()
         // A pin identifies where the row originally came from; it does not
         // override the source switch. Looking the instance up directly used to
@@ -239,6 +261,25 @@ object SourceResolver {
         if (pinned != null) {
             attempt(pinned) { pinned.stream(trackId, request) }
                 ?.let { return it.copy(sourceConfigId = pinned.configId) }
+        }
+
+        // The track's own source could not serve it. When the track came from
+        // Apple's catalogue, its id *is* an Apple catalogue id — and another
+        // addon may well hold that id, because addons that serve Apple music
+        // are addressed by exactly this id.
+        //
+        // So the other sources are asked for the very id before they are
+        // asked to find the track by name. The id answer is the recording
+        // itself rather than a search that might land on a different
+        // recording of the same song, which is the whole point of carrying
+        // the catalogue id at all.
+        if (com.music.bitchord.data.apple.AppleManifestLocator.isAppleConfig(configId)) {
+            for (source in active.filterNot { it.configId == configId }
+                .filter { it.servesAudio && it.kind == SourceKind.ADDON }) {
+                val stream = attempt(source) { source.stream(trackId, request) } ?: continue
+                TrackLog.d(TAG, "apple id: '${target.title}' served by ${source.displayName}")
+                return stream.copy(sourceConfigId = source.configId)
+            }
         }
 
         // Last resort. A track whose own source is down is still a track the

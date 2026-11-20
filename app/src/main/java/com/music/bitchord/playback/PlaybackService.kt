@@ -60,6 +60,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.audio.SilenceSkippingAudioProcessor
+import androidx.media3.exoplayer.drm.DefaultDrmSessionManagerProvider
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -224,6 +225,14 @@ const val ACTION_COMMIT_RADIO_QUEUE = "com.music.bitchord.action.COMMIT_RADIO_QU
 
 /** Session command behind the player menu's "Upgrade quality". */
 const val ACTION_UPGRADE_QUALITY = "com.music.bitchord.action.UPGRADE_QUALITY"
+
+/**
+ * Session command behind the quality badge's switch cue.
+ *
+ * Carries the rendition to open at — `atmos`, `hires` or `lossless` — in
+ * [EXTRA_RENDITION].
+ */
+const val ACTION_SWITCH_RENDITION = "com.music.bitchord.action.SWITCH_RENDITION"
 
 /**
  * App-side gate for explicit quality retries.
@@ -840,6 +849,7 @@ class PlaybackService : MediaLibraryService() {
     private val beginRadioQueueCommand = SessionCommand(ACTION_BEGIN_RADIO_QUEUE, Bundle.EMPTY)
     private val commitRadioQueueCommand = SessionCommand(ACTION_COMMIT_RADIO_QUEUE, Bundle.EMPTY)
     private val upgradeQualityCommand = SessionCommand(ACTION_UPGRADE_QUALITY, Bundle.EMPTY)
+    private val switchRenditionCommand = SessionCommand(ACTION_SWITCH_RENDITION, Bundle.EMPTY)
     private val swapVersionCommand = SessionCommand(ACTION_SWAP_VERSION, Bundle.EMPTY)
     private val reorderQueueCommand = SessionCommand(ACTION_REORDER_QUEUE, Bundle.EMPTY)
     private val queueDragCommand = SessionCommand(ACTION_QUEUE_DRAG, Bundle.EMPTY)
@@ -1070,6 +1080,9 @@ class PlaybackService : MediaLibraryService() {
                 swappingMediaId = null
                 return
             }
+            // What played lately, for the search page's first screen. A
+            // quality swap returns above, so one track is one entry.
+            mediaItem?.toSong()?.let { RecentlyPlayed.record(it) }
 
             // A queue built before the listener marked an act as AI (or hid it)
             // would otherwise still walk straight into that track on the next
@@ -1343,7 +1356,9 @@ class PlaybackService : MediaLibraryService() {
             )
             TrackLog.i(
                 "AUDIO_OUT",
-                "AudioTrack ${audioTrackConfig.sampleRate}Hz encoding=${audioTrackConfig.encoding}",
+                "AudioTrack ${audioTrackConfig.sampleRate}Hz encoding=${audioTrackConfig.encoding} " +
+                    "active=${player?.currentMediaItem?.mediaId ?: "-"} vol=${player?.volume} " +
+                    "standby=${spare?.currentMediaItem?.mediaId ?: "-"} svol=${spare?.volume}",
                 about = eventTime.mediaId(),
             )
         }
@@ -1383,6 +1398,14 @@ class PlaybackService : MediaLibraryService() {
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
+            // Where the playhead jumped to, and why. A live station that
+            // breaks silently shows it here: the jump is the moment the
+            // stream stopped being the thing it was.
+            TrackLog.d(
+                "AUDIO_OUT",
+                "position ${oldPosition.positionMs}ms -> ${newPosition.positionMs}ms (reason $reason)",
+                about = eventTime.mediaId(),
+            )
             measuredBitrate.onDiscontinuity(eventTime.mediaId())
         }
 
@@ -1614,10 +1637,19 @@ class PlaybackService : MediaLibraryService() {
         AudioCache.setUpstream(defaultDataSourceFactory)
         // DsdExtractorsFactory: the stock extractors plus DSF/DFF, which Media3
         // cannot open at all. A DSD file leaves the extractor as float PCM.
+        //
+        // The DRM provider is what makes an encrypted stream playable: Apple's
+        // live radio is Widevine-protected, and the license for it is fetched
+        // from the endpoint the row names. The provider is attached to the
+        // factory rather than to a player, so every player and every read
+        // ahead can open an encrypted stream.
+        val drmProvider = DefaultDrmSessionManagerProvider()
+        drmProvider.setDrmHttpDataSourceFactory(OkHttpDataSource.Factory(Http.client))
         mediaSourceFactory = DefaultMediaSourceFactory(
             AudioCache.playbackFactory(defaultDataSourceFactory),
             DsdExtractorsFactory(),
         )
+            .setDrmSessionManagerProvider(drmProvider)
             .setLoadErrorHandlingPolicy(PermanentAwareLoadErrorPolicy())
     }
 
@@ -5053,6 +5085,15 @@ class PlaybackService : MediaLibraryService() {
     private var upgradeFadeActive = false
 
     /**
+     * True while a rendition switch is in flight.
+     *
+     * The switch re-opens the current item at another rendition, and two of
+     * them at once would fight over the same slot — the second one reading a
+     * position the first has already moved past.
+     */
+    private var renditionSwitchInFlight = false
+
+    /**
      * The shift the upgrade fade measured between the playing copy and the
      * incoming one — target position = source position + this.
      *
@@ -5114,6 +5155,10 @@ class PlaybackService : MediaLibraryService() {
         val item = player.currentMediaItem ?: return
         val mediaId = item.mediaId
         val uri = item.localConfiguration?.uri
+        // A live station is left as it is: there is no better copy of a
+        // broadcast, and looking for one replaces the broadcast with
+        // something that is not it.
+        if (LiveRadio.isLiveStream(uri)) return
         val alreadyPending = QualityUpgrade.isPending(mediaId)
         val shelved = QualityUpgrade.shelvedFor(mediaId)
         if (shelved == null && !alreadyPending && !QualityUpgrade.couldStillUpgrade(mediaId, uri, byHand)) return
@@ -5275,6 +5320,74 @@ class PlaybackService : MediaLibraryService() {
         TrackLog.d("BitChord", "upgrade asked for by hand for $mediaId", about = mediaId)
         lookForBetterCopy(player, byHand = true)
         return UpgradeOutcome.STARTED
+    }
+
+    /**
+     * Re-opens the playing track in another rendition, at the same position.
+     *
+     * The choice rides on the item's URI so preparation, the resolver and the
+     * disk cache all agree on which file this is. No global setting changes,
+     * and the next track keeps the listener's rung.
+     *
+     * @param rendition one of `atmos`, `hires` or `lossless`.
+     */
+    private fun switchCurrentRendition(rendition: String) {
+        if (renditionSwitchInFlight) return
+        val active = player ?: return
+        // The standby pair is shared with the quality fade and version swaps.
+        if (upgradeFadeActive || versionSwapJob?.isActive == true) return
+        if (crossfade?.isTransitioning() == true) return
+        val item = active.currentMediaItem ?: return
+        val uri = item.localConfiguration?.uri ?: return
+        val target = when (rendition) {
+            "atmos", "hires", "lossless" -> rendition
+            else -> return
+        }
+        if (uri.getQueryParameter("rend") == target) return
+        // Uri.Builder has no remove; replace the whole query with every
+        // parameter except the old rendition, then the new one.
+        val kept = uri.encodedQuery.orEmpty()
+            .split('&')
+            .filterNot { it.substringBefore('=') == "rend" }
+        val switchedUri = uri.buildUpon()
+            .encodedQuery((kept + "rend=$target").joinToString("&"))
+            .build()
+        val switched = item.buildUpon().setUri(switchedUri).build()
+        val mediaId = item.mediaId
+        // Both pins are keyed by media id and outlive a rendition change. Left
+        // alone they would hand the new item the old mix's URL.
+        StreamChoice.forget(mediaId)
+        QualityUpgrade.forget(mediaId, keepHandAsk = true)
+        renditionSwitchInFlight = true
+        scope.launch(Dispatchers.Main) {
+            try {
+                val now = swapPointFor(mediaId)
+                if (now == null) {
+                    swapRenditionDirect(switched)
+                    return@launch
+                }
+                when (crossfadeUpgradeIn(mediaId, now, switched, switchedUri.toString())) {
+                    UpgradeSwap.Crossfaded, UpgradeSwap.Abandoned, UpgradeSwap.Failed -> Unit
+                    UpgradeSwap.Fallback -> swapRenditionDirect(switched)
+                }
+            } finally {
+                renditionSwitchInFlight = false
+            }
+        }
+    }
+
+    /** The direct half of [switchCurrentRendition]: same position, no fade. */
+    private fun swapRenditionDirect(item: MediaItem) {
+        val active = player ?: return
+        val index = active.currentMediaItemIndex
+        if (index !in 0 until active.mediaItemCount) return
+        if (active.currentMediaItem?.mediaId != item.mediaId) return
+        val at = active.currentPosition
+        swappingMediaId = item.mediaId
+        swapCutAt = SystemClock.elapsedRealtime()
+        active.replaceMediaItem(index, item)
+        active.seekTo(index, at)
+        active.prepare()
     }
 
     /**
@@ -7067,7 +7180,23 @@ class PlaybackService : MediaLibraryService() {
     private fun restoreLastQueue(player: ExoPlayer): Boolean {
         val last = LastPlayed.load() ?: return false
         persistedQueueStart = 0
-        player.setMediaItems(last.songs.map { it.toMediaItem() }, last.index, last.positionMs)
+        val items = last.songs.map { it.toMediaItem() }
+        // A live station starts where the broadcast is now. The position it
+        // was left at is a place in a window that has since rolled on, and
+        // seeking there plays nothing at all.
+        val live = last.songs.getOrNull(last.index)?.liveStreamUrl != null ||
+            items.getOrNull(last.index)?.localConfiguration?.uri
+                ?.let { LiveRadio.isLiveStream(it) } == true
+        player.setMediaItems(
+            items,
+            last.index,
+            // C.TIME_UNSET, not 0: 0 is the oldest edge of the live window,
+            // not "live". Starting there makes the player chase a window that
+            // has already moved, which is heard as a stutter every segment.
+            // The default live position keeps the target offset behind the
+            // live edge and leaves room to buffer.
+            if (live) C.TIME_UNSET else last.positionMs,
+        )
         return true
     }
 
@@ -7583,7 +7712,36 @@ class PlaybackService : MediaLibraryService() {
                     if (mimeType == MimeTypes.AUDIO_FLAC) {
                         candidates.filterNot { AudioOutputPolicy.isUnsafeFloatFlacDecoder(it.name) }
                     } else {
-                        candidates
+                        // The software AAC decoder comes first on Android 16.
+                        // It is the one that receives Apple's live radio too,
+                        // and on this device it accepts the crypto config and
+                        // then produces silence — an occasional hiss when a
+                        // block happens to line up. The vendor decoder is
+                        // offered the same media but is listed second; put it
+                        // first for AAC so the encrypted stream gets a decoder
+                        // that can actually carry it.
+                        if (mimeType == MimeTypes.AUDIO_AAC) {
+                            TrackLog.d(
+                                "AUDIO_OUT",
+                                "AAC decoders: " + candidates.joinToString { info ->
+                                    "${info.name} hw=${info.hardwareAccelerated} " +
+                                        "sw=${info.softwareOnly} secure=${info.secure}"
+                                },
+                            )
+                            // A vendor decoder is not always flagged as
+                            // hardware-accelerated, but any vendor AAC decoder
+                            // is a better bet for encrypted audio than the
+                            // platform software one, which is known to accept
+                            // the crypto config and then emit silence on this
+                            // device. Put every non-software name first.
+                            candidates.sortedWith(
+                                compareByDescending<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> {
+                                    it.hardwareAccelerated
+                                }.thenByDescending { it.name != "c2.android.aac.decoder" },
+                            )
+                        } else {
+                            candidates
+                        }
                     }
                 }
             }
@@ -9192,6 +9350,11 @@ class PlaybackService : MediaLibraryService() {
                 val p = player ?: continue
                 if (!p.isPlaying) continue
                 val id = p.currentMediaItem?.mediaId ?: continue
+                // A live station's position is where the broadcast is now, not
+                // a place in a track: keeping it would resume the station
+                // there on the next start, which is outside the live window
+                // and plays nothing.
+                if (LiveRadio.isLiveStream(p.currentMediaItem?.localConfiguration?.uri)) continue
                 val dur = p.duration.takeIf { it > 0L } ?: 0L
                 com.music.bitchord.data.settings.MediaProgress.record(
                     id, p.currentPosition.coerceAtLeast(0L), dur,
@@ -9207,6 +9370,7 @@ class PlaybackService : MediaLibraryService() {
         val p = player
         val id = p?.currentMediaItem?.mediaId
         if (p != null && id != null) {
+            if (LiveRadio.isLiveStream(p.currentMediaItem?.localConfiguration?.uri)) return
             val dur = p.duration.takeIf { it > 0L } ?: 0L
             com.music.bitchord.data.settings.MediaProgress.record(
                 id, p.currentPosition.coerceAtLeast(0L), dur,
@@ -9803,6 +9967,7 @@ class PlaybackService : MediaLibraryService() {
                 .add(beginRadioQueueCommand)
                 .add(commitRadioQueueCommand)
                 .add(upgradeQualityCommand)
+                .add(switchRenditionCommand)
                 .add(swapVersionCommand)
                 .add(reorderQueueCommand)
                 .add(queueDragCommand)
@@ -9853,6 +10018,10 @@ class PlaybackService : MediaLibraryService() {
                         val targetSong = songFromBundle(bundle)
                         smoothSwapCurrentTrackVersion(targetSong.toMediaItem())
                     }
+                }
+                ACTION_SWITCH_RENDITION -> {
+                    val rendition = args.getString(EXTRA_RENDITION).orEmpty()
+                    switchCurrentRendition(rendition)
                 }
                 ACTION_REORDER_QUEUE -> player?.let { QueueShuffle.reorderFromCommand(it, args) }
                 ACTION_QUEUE_DRAG -> {

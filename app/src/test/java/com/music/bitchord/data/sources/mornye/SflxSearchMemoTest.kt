@@ -27,8 +27,15 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class SflxSearchMemoTest {
 
-    /** A clock the test moves by hand. */
-    private class Clock(var now: Long = 1_000L) {
+    /**
+     * A clock the test moves by hand.
+     *
+     * The memo reads the clock from whichever thread answers the question,
+     * so the reading must see the test's own moves — without that, the
+     * timestamp it writes can be an older one, and the answer looks stale
+     * before its time.
+     */
+    private class Clock(@Volatile var now: Long = 1_000L) {
         fun advance(ms: Long) { now += ms }
         fun read(): Long = now
     }
@@ -105,6 +112,26 @@ class SflxSearchMemoTest {
             Result.success("something else")
         }.getOrNull()
         assertEquals("the stale answer was not used", 2, asked.get())
+    }
+
+    @Test
+    fun `a finished question does not answer a stale one`() = runBlocking {
+        val clock = Clock()
+        val memo = SflxSearchMemo<String>(ttlMs = 120_000, clock = clock::read)
+        val asked = AtomicInteger(0)
+
+        // The same question, asked and answered again and again, each time
+        // after its answer has gone stale. A finished question left in the
+        // book's index must not answer the next one — the catalogue may have
+        // changed since. Run it often enough for that race to show up.
+        repeat(200) {
+            memo.once("tidal|heavy moon|5") {
+                asked.incrementAndGet()
+                Result.success("Heavy Moon")
+            }.getOrNull()
+            clock.advance(121_000)
+        }
+        assertEquals("every stale question was asked again", 200, asked.get())
     }
 
     @Test

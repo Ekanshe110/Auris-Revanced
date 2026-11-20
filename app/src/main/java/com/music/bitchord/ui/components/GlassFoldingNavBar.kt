@@ -46,6 +46,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
@@ -420,6 +421,7 @@ private fun SearchBarPlaceholder(
                     imageVector = when (state.searchSource) {
                         SearchSource.LIBRARY -> Icons.Rounded.LibraryMusic
                         SearchSource.SPOTIFY -> Icons.Rounded.MusicNote
+                        SearchSource.APPLE -> Icons.Rounded.Album
                         SearchSource.YOUTUBE -> Icons.Rounded.Language
                     },
                     contentDescription = null,
@@ -554,6 +556,7 @@ private fun NavBarSearchInputBar(
                     imageVector = when (state.searchSource) {
                         SearchSource.LIBRARY -> Icons.Rounded.LibraryMusic
                         SearchSource.SPOTIFY -> Icons.Rounded.MusicNote
+                        SearchSource.APPLE -> Icons.Rounded.Album
                         SearchSource.YOUTUBE -> Icons.Rounded.Language
                     },
                     contentDescription = null,

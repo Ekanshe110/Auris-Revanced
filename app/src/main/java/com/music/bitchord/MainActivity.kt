@@ -5904,6 +5904,12 @@ private fun RootPage(
                 viewModel.searchFor(term)
                 nav.selectedTab = TAB_SEARCH
             },
+            // The chevron after a group's title: the whole group, not one
+            // card of it. The items are already loaded, so the page is local.
+            onShelfHeaderClick = { shelf ->
+                viewModel.openShelfPage(shelf)
+                sheets.detailActiveShelf = shelf
+            },
             onRetry = viewModel::loadAppleBrowse,
             refreshing = false,
             onRefresh = { viewModel.loadAppleBrowse() },

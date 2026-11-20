@@ -181,6 +181,11 @@ fun AppleBrowseScreen(
     /** The directory of what else there is to browse, and the way into it. */
     directory: List<Pair<String, String>> = emptyList(),
     onBrowse: (String) -> Unit = { },
+    /**
+     * Tapping a group's heading. The chevron after the title says the row is
+     * a way into the whole group, so the heading has to answer a tap.
+     */
+    onShelfHeaderClick: ((HomeShelf) -> Unit)? = null,
     onRetry: () -> Unit,
     refreshing: Boolean,
     onRefresh: () -> Unit,
@@ -235,6 +240,7 @@ fun AppleBrowseScreen(
                             shelf = shelf,
                             onItemClick = onItemClick,
                             onItemLongPress = onItemLongPress,
+                            onShelfHeaderClick = onShelfHeaderClick,
                         )
                     }
                     // The directory of what else there is to browse, the way
@@ -278,22 +284,29 @@ private fun AppleShelfCarousel(
     shelf: HomeShelf,
     onItemClick: (ShelfItem, String) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)?,
+    onShelfHeaderClick: ((HomeShelf) -> Unit)? = null,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             // Apple's headings carry a chevron, because a heading over a row
-            // is a way into more of it rather than a label.
+            // is a way into more of it rather than a label — and it is the
+            // heading that is tapped, not just the arrow after it.
             text = shelf.title + "  \u203A",
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(
-                start = PAGE_GUTTER,
-                end = PAGE_GUTTER,
-                top = 18.dp,
-                bottom = 8.dp,
-            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = onShelfHeaderClick != null) {
+                    onShelfHeaderClick?.invoke(shelf)
+                }
+                .padding(
+                    start = PAGE_GUTTER,
+                    end = PAGE_GUTTER,
+                    top = 18.dp,
+                    bottom = 8.dp,
+                ),
         )
         LazyRow(
             modifier = Modifier.fillMaxWidth(),

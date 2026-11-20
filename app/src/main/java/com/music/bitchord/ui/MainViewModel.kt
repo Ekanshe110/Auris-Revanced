@@ -5249,6 +5249,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * Opens a whole shelf — every card in the group whose heading was tapped.
+     *
+     * The items are already in memory, so this pushes the page and nothing is
+     * fetched: the detail screen draws the shelf as a grid, and Back returns
+     * to the tab it came from.
+     */
+    fun openShelfPage(shelf: HomeShelf) {
+        if (shelf.items.isEmpty()) return
+        val id = "shelf:" + shelf.title.lowercase().replace(' ', '-')
+        if (_detailStack.value.lastOrNull()?.browseId == id) return
+        _detailStack.value += DetailPage(
+            browseId = id,
+            title = shelf.title,
+            subtitle = "",
+            thumbnailUrl = shelf.items.firstOrNull()?.thumbnailUrl,
+            songs = UiState.Success(emptyList()),
+            type = BrowseType.OTHER,
+        )
+    }
+
+    /**
      * Opens one catalogue lockup the search page draws — an album or a
      * playlist Apple published. The row's page is read from the catalogue,
      * not from the listener's library: the wall is Apple's catalogue, and an

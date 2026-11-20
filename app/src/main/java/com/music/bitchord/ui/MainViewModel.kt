@@ -5142,14 +5142,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * A genre tile, opened as the page Apple opens: its playlists and albums.
      */
-    fun openAppleGenre(curatorId: String, name: String) {
+    fun openAppleGenre(curatorId: String, name: String, artworkUrl: String? = null) {
         if (name.isBlank()) return
         val browseId = "apple:genre:$curatorId"
         _detailStack.value += DetailPage(
             browseId = browseId,
             title = name,
             subtitle = "",
-            thumbnailUrl = null,
+            // The tile's own cover, so the page opens on the art the listener
+            // tapped rather than on an empty hero.
+            thumbnailUrl = artworkUrl,
             songs = UiState.Success(emptyList()),
             type = BrowseType.OTHER,
         )

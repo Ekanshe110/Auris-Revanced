@@ -6077,7 +6077,7 @@ private fun RootPage(
             } else {
                 emptyList()
             },
-            onGenreClick = { genre -> viewModel.openAppleGenre(genre.id, genre.name) },
+            onGenreClick = { genre -> viewModel.openAppleGenre(genre.id, genre.name, genre.artworkUrl) },
             // The catalogue under the wall is the New page's own shelves: the
             // albums, playlists and stations Apple publishes for this account
             // and storefront, drawn here so the search page is a catalogue and

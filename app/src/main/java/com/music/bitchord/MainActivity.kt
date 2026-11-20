@@ -5783,6 +5783,12 @@ private fun RootPage(
         HomeScreen(
             state = homeWithFlow,
             listState = scroll.home,
+            // The chevron after a shelf's title: the whole group, drawn by the
+            // detail screen from the items already in memory.
+            onShelfHeaderClick = { shelf ->
+                viewModel.openShelfPage(shelf)
+                sheets.detailActiveShelf = shelf
+            },
             currentSong = player.song,
             isPlaying = player.isPlaying,
             title = stringResource(R.string.home),

@@ -138,6 +138,11 @@ private fun ShelfItem.matchesCurrentlyPlaying(song: Song?): Boolean {
 fun HomeScreen(
     state: UiState<List<HomeShelf>>,
     listState: LazyListState,
+    /**
+     * A shelf's heading was tapped. The chevron after every title says the
+     * row leads somewhere; this is the somewhere.
+     */
+    onShelfHeaderClick: ((HomeShelf) -> Unit)? = null,
     /** The tapped item and the recommendation shelf it came from. */
     onItemClick: (ShelfItem, String) -> Unit,
     onRetry: () -> Unit,
@@ -336,6 +341,7 @@ fun HomeScreen(
                         onFlowClick = onFlowClick,
                         onOpenReplay = if (leadingCardsAsTiles) null else onOpenReplay,
                         onOpenQuickPicks = onOpenQuickPicks,
+                        onShelfHeaderClick = onShelfHeaderClick,
                         firstIsHero = leadHero && !recentlyPlayedLoading,
                         recentsViewType = recentsViewType,
                         onRecentsViewTypeToggle = {
@@ -397,6 +403,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
     onOpenReplay: (() -> Unit)? = null,
     /** Opens the whole Quick Picks set — the arrow at the end of its heading. */
     onOpenQuickPicks: (() -> Unit)? = null,
+    onShelfHeaderClick: ((HomeShelf) -> Unit)? = null,
     firstIsHero: Boolean = true,
     recentsViewType: LibraryViewType,
     onRecentsViewTypeToggle: () -> Unit,
@@ -527,6 +534,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexedShelves(
                     onItemLongPress = onItemLongPress,
                     currentSong = currentSong,
                     isPlaying = isPlaying,
+                    onHeaderNavigate = { onShelfHeaderClick?.invoke(shelf) },
                 )
             }
         }

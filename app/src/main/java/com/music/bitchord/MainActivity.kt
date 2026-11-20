@@ -5093,7 +5093,11 @@ private fun RootPage(
         // Kotlin will not smart-cast a public nullable
         // property declared in another module.
         val browseId = item.browseId
+        val externalUrl = item.externalUrl
         when {
+            externalUrl != null -> context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)),
+            )
             browseId == com.music.bitchord.data.flow.FlowRules.FLOW_BROWSE_ID -> {
                 // Flow tap only opens the page — never
                 // rebuilds, never plays. BACK + tap
@@ -5691,14 +5695,25 @@ private fun RootPage(
                 pageActions.playBrowsePageShuffled(page, songs)
             },
             onSectionItemClick = { item ->
-                item.browseId?.let { id ->
-                    viewModel.openDetail(
-                        browseId = id,
-                        title = item.title,
-                        subtitle = item.subtitle,
-                        thumbnailUrl = item.thumbnailUrl,
-                        type = BrowseType.ALBUM,
+                val externalUrl = item.externalUrl
+                val song = pageActions.shelfSong(item)
+                if (externalUrl != null) {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)))
+                } else if (song != null) {
+                    pageActions.playRadio(
+                        song,
+                        QueueSource(page.title, PlaybackSourceType.BROWSE, page.browseId),
                     )
+                } else {
+                    item.browseId?.let { id ->
+                        viewModel.openDetail(
+                            browseId = id,
+                            title = item.title,
+                            subtitle = item.subtitle,
+                            thumbnailUrl = item.thumbnailUrl,
+                            type = BrowseType.ALBUM,
+                        )
+                    }
                 }
             },
             onSectionItemLongPress = pageActions.onBrowseLongPress,

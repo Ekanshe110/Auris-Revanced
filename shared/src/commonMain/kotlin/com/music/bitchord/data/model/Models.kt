@@ -433,7 +433,7 @@ enum class SearchFilter(val label: String, val params: String?) {
     PODCASTS("Podcasts", null),
 }
 
-/** A card in a home-feed carousel: either a track (videoId) or an album/playlist (browseId). */
+/** A catalogue card: a track, an in-app page, or Apple-hosted media. */
 data class ShelfItem(
     val title: String,
     val subtitle: String,
@@ -453,6 +453,8 @@ data class ShelfItem(
      * not a statement about popularity.
      */
     val popularity: Int? = null,
+    /** Apple's own destination for media this app cannot play directly. */
+    val externalUrl: String? = null,
 )
 
 /**
@@ -652,6 +654,13 @@ data class LibraryPage(
         get() = likedSongs.isEmpty() && librarySongs.isEmpty() && shelves.isEmpty()
 }
 
+/** A feature card above an editorial page's ordinary shelves. */
+data class EditorialHero(
+    val item: ShelfItem,
+    val badge: String = "",
+    val description: String = "",
+)
+
 /** A browsed album / artist / playlist page. */
 data class DetailPage(
     val browseId: String,
@@ -660,8 +669,10 @@ data class DetailPage(
     val thumbnailUrl: String?,
     val songs: UiState<List<Song>>,
     val type: BrowseType = BrowseType.OTHER,
-    /** Albums / singles carousels, populated for artist pages. */
+    /** Albums / singles carousels, populated for artist and editorial pages. */
     val sections: List<HomeShelf> = emptyList(),
+    /** Apple's feature cards above an editorial page's shelves. */
+    val editorialHeroes: List<EditorialHero> = emptyList(),
     /**
      * Tracks YouTube offers to round out a playlist but that were never
      * added — see [com.music.bitchord.data.innertube.InnertubeParser.parsePlaylistShelf].

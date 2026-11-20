@@ -323,7 +323,16 @@ object AppleCatalogue {
         get(
             baseUrl,
             listOf("browse", "genre"),
-            mapOf("id" to curatorId),
+            mapOf("id" to curatorId, "n" to System.currentTimeMillis().toString()),
+            AppleEditorialPage.serializer(),
+        )
+
+    /** An ordinary curator's complete playlist catalogue, not a search for its name. */
+    suspend fun curatorPage(baseUrl: String, curatorId: String): Result<AppleEditorialPage> =
+        get(
+            baseUrl,
+            listOf("browse", "curator"),
+            mapOf("id" to curatorId, "n" to System.currentTimeMillis().toString()),
             AppleEditorialPage.serializer(),
         )
 
@@ -692,6 +701,8 @@ data class AppleEditorialItem(
     @SerialName("artistName") val artistName: String = "",
     @SerialName("artworkURL") val artworkURL: String? = null,
     @SerialName("url") val url: String? = null,
+    @SerialName("badge") val badge: String = "",
+    @SerialName("description") val description: String = "",
 )
 
 /** One shelf of an editorial page Apple publishes. */
@@ -707,6 +718,7 @@ data class AppleEditorialShelf(
 data class AppleEditorialPage(
     @SerialName("page") val page: String = "",
     @SerialName("updatedAt") val updatedAt: String = "",
+    @SerialName("heroes") val heroes: List<AppleEditorialItem> = emptyList(),
     @SerialName("shelves") val shelves: List<AppleEditorialShelf> = emptyList(),
 )
 

@@ -351,6 +351,8 @@ fun DetailScreen(
         rawSongs.withIndex().associate { (i, s) -> s.videoId to i + 1 }
     }
     val isArtist = page.type == BrowseType.ARTIST
+    val isAppleEditorial = page.browseId.startsWith(com.music.bitchord.data.apple.AppleSources.GENRE_PREFIX) ||
+        page.browseId.startsWith(com.music.bitchord.data.apple.AppleSources.CURATOR_PREFIX)
     // The overflow menu's two shortcuts. Titles are localised, so the match is
     // on the stable words YouTube uses across locales plus a positional
     // fallback — an artist page's first shelf is albums and its second singles.
@@ -489,7 +491,11 @@ fun DetailScreen(
         modifier = modifier.fillMaxSize(),
     ) { targetShelf ->
         if (targetShelf == null) {
-            BoxWithConstraints(Modifier.fillMaxSize().background(palette.wash)) {
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxSize()
+                    .background(if (isAppleEditorial) MaterialTheme.colorScheme.background else palette.wash),
+            ) {
                 // The artwork is drawn behind the list rather than in it, so both need
                 // to agree on its height without being able to ask each other. The
                 // width is the page's, so the ratio decides it and both can work it out
@@ -506,15 +512,17 @@ fun DetailScreen(
                 val artHeight = (maxWidth / if (isArtist) ARTIST_PHOTO_RATIO else SLEEVE_RATIO)
                     .coerceAtMost(maxHeight * 0.6f)
 
-                PageBackground(
-                    page = page,
-                    palette = palette,
-                    canvas = canvas,
-                    artHeight = artHeight,
-                    listState = listState,
-                    heroUrl = appleArt?.heroUrl,
-                    modifier = Modifier.matchParentSize(),
-                )
+                if (!isAppleEditorial) {
+                    PageBackground(
+                        page = page,
+                        palette = palette,
+                        canvas = canvas,
+                        artHeight = artHeight,
+                        listState = listState,
+                        heroUrl = appleArt?.heroUrl,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
 
                 LazyColumn(
                     state = listState,
@@ -524,7 +532,14 @@ fun DetailScreen(
                     contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
                 ) {
             item(key = "header") {
-                if (isArtist) {
+                if (isAppleEditorial) {
+                    EditorialGenreHeader(
+                        title = page.title,
+                        heroes = page.editorialHeroes,
+                        palette = palette,
+                        onItemClick = onSectionItemClick,
+                    )
+                } else if (isArtist) {
                     ArtistHeader(page = page, palette = palette, artHeight = artHeight, appleArt = appleArt)
                 } else {
                     ReleaseHeader(
@@ -794,33 +809,46 @@ fun DetailScreen(
                 key = { index, shelf -> "section:$index:${shelf.title}" },
                 contentType = { _, _ -> LazyContent.SHELF },
             ) { _, shelf ->
-                val canShowAll = shelf.items.size > ARTIST_ROW_MAX_ITEMS
-                val displayItems = remember(shelf.items) {
-                    if (canShowAll) shelf.items.take(ARTIST_ROW_MAX_ITEMS) else shelf.items
-                }
-                val displayKeys = rememberShelfKeys(displayItems)
-                Column(Modifier.padding(top = 22.dp)) {
-                    SectionHeading(
-                        title = shelf.title,
+                if (isAppleEditorial) {
+                    EditorialGenreShelf(
+                        shelf = shelf,
                         palette = palette,
-                        onShowAll = if (canShowAll) { { onActiveShelfChange(shelf) } } else null,
-                        horizontalPadding = ARTIST_CONTENT_GUTTER,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                        onItemClick = onSectionItemClick,
+                        onSongLongPress = onSongLongPress,
+                        onItemLongPress = onSectionItemLongPress,
+                        onShowAll = { onActiveShelfChange(shelf) },
                     )
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        itemsIndexed(
-                            displayItems,
-                            key = { index, _ -> displayKeys[index] },
-                            contentType = { _, _ -> LazyContent.CARD },
-                        ) { _, item ->
-                            SectionCard(
-                                item = item,
-                                palette = palette,
-                                onClick = { onSectionItemClick(item) },
-                                onLongPress = onSectionItemLongPress?.let { { it(item) } },
-                            )
+                } else {
+                    val canShowAll = shelf.items.size > ARTIST_ROW_MAX_ITEMS
+                    val displayItems = remember(shelf.items) {
+                        if (canShowAll) shelf.items.take(ARTIST_ROW_MAX_ITEMS) else shelf.items
+                    }
+                    val displayKeys = rememberShelfKeys(displayItems)
+                    Column(Modifier.padding(top = 22.dp)) {
+                        SectionHeading(
+                            title = shelf.title,
+                            palette = palette,
+                            onShowAll = if (canShowAll) { { onActiveShelfChange(shelf) } } else null,
+                            horizontalPadding = ARTIST_CONTENT_GUTTER,
+                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = ARTIST_CONTENT_GUTTER),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            itemsIndexed(
+                                displayItems,
+                                key = { index, _ -> displayKeys[index] },
+                                contentType = { _, _ -> LazyContent.CARD },
+                            ) { _, item ->
+                                SectionCard(
+                                    item = item,
+                                    palette = palette,
+                                    onClick = { onSectionItemClick(item) },
+                                    onLongPress = onSectionItemLongPress?.let { { it(item) } },
+                                )
+                            }
                         }
                     }
                 }
@@ -853,6 +881,7 @@ fun DetailScreen(
         onItemClick = onSectionItemClick,
         onItemLongPress = onSectionItemLongPress,
         contentPadding = contentPadding,
+        preserveOrder = isAppleEditorial,
     )
 }
 }
@@ -2248,7 +2277,13 @@ private fun SectionCard(
 ) {
     Column(
         modifier = modifier
-            .longPressMenuClickable(onClick = onClick, onLongClick = onLongPress),
+            .longPressMenuClickable(
+                onClick = onClick,
+                onLongClick = onLongPress,
+                // Some Apple uploaded videos have no public URL. They remain
+                // visible, but an item with no destination is not a live button.
+                enabled = item.videoId != null || item.browseId != null || item.externalUrl != null,
+            ),
     ) {
         AsyncImage(
             model = item.thumbnailUrl.artworkAt(CARD_ART_PX),
@@ -2286,6 +2321,7 @@ private fun ArtistShelfGridPage(
     onItemLongPress: ((ShelfItem) -> Unit)?,
     contentPadding: PaddingValues,
     modifier: Modifier = Modifier,
+    preserveOrder: Boolean = false,
 ) {
     val gridState = rememberLazyGridState()
     // Release date is the order a discography is normally read in: newest
@@ -2293,12 +2329,20 @@ private fun ArtistShelfGridPage(
     // order a career is usually read in. Popularity keeps Spotify's own
     // ranking where it gave one, and the catalogue's order everywhere else.
     var sort by rememberSaveable(shelf.title) { mutableStateOf(ShelfSort.RELEASE_DATE) }
-    val items = remember(shelf.items, sort) { shelf.items.sortedForShelf(sort) }
+    val items = remember(shelf.items, sort, preserveOrder) {
+        if (preserveOrder) shelf.items else shelf.items.sortedForShelf(sort)
+    }
     val keys = rememberShelfKeys(items)
     BoxWithConstraints(modifier.fillMaxSize().background(palette.background)) {
         val grid = libraryGrid(maxWidth - PAGE_GUTTER * 2)
         Column(Modifier.fillMaxSize()) {
-            ShelfSortRow(palette = palette, selected = sort, onSelect = { sort = it })
+            if (preserveOrder) {
+                // Apple has already ranked an editorial shelf. Sorting its
+                // year-less cards alphabetically would destroy that order.
+                Spacer(Modifier.height(topBarContentPadding()))
+            } else {
+                ShelfSortRow(palette = palette, selected = sort, onSelect = { sort = it })
+            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(grid.columns),
                 state = gridState,

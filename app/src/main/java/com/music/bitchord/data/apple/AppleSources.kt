@@ -2,6 +2,7 @@ package com.music.bitchord.data.apple
 
 import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.BrowseType
+import com.music.bitchord.data.model.EditorialHero
 import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.PlaybackSourceType
 import com.music.bitchord.data.model.RadioStation
@@ -10,6 +11,11 @@ import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.addon.AddonManifest
+
+internal data class AppleEditorialDetails(
+    val heroes: List<EditorialHero>,
+    val shelves: List<HomeShelf>,
+)
 
 /**
  * The Apple Music catalogue, as the app's own rows.
@@ -46,6 +52,12 @@ internal object AppleSources {
 
     /** A radio station, opened as a page of its own. */
     const val STATION_PREFIX = "apple:station:"
+
+    /** An Apple editorial curator, including the genre tiles on Search. */
+    const val GENRE_PREFIX = "apple:genre:"
+
+    /** An ordinary curator and the complete playlist catalogue it publishes. */
+    const val CURATOR_PREFIX = "apple:curator:"
 
 
     /**
@@ -269,10 +281,18 @@ internal object AppleSources {
      * the page, so the addon resolves one from the other. The rows are the
      * vendor's own: its playlists, its new releases, its essential albums.
      */
-    suspend fun genrePage(handle: Handle, curatorId: String): Result<List<HomeShelf>> =
-        AppleCatalogue.genrePage(handle.baseUrl, curatorId).map { page ->
-            page.shelves.mapNotNull { it.toHomeShelf(handle) }
-        }
+    suspend fun genrePage(handle: Handle, curatorId: String): Result<AppleEditorialDetails> =
+        AppleCatalogue.genrePage(handle.baseUrl, curatorId).map { it.toDetails(handle) }
+
+    /** An ordinary curator's page — every playlist Apple publishes for it. */
+    suspend fun curatorPage(handle: Handle, curatorId: String): Result<AppleEditorialDetails> =
+        AppleCatalogue.curatorPage(handle.baseUrl, curatorId).map { it.toDetails(handle) }
+
+    private fun AppleEditorialPage.toDetails(handle: Handle): AppleEditorialDetails =
+        AppleEditorialDetails(
+            heroes = heroes.mapNotNull { it.toEditorialHero(handle) },
+            shelves = shelves.mapNotNull { it.toHomeShelf(handle) },
+        )
 
     /** Apple's search-page genres; empty on an addon without the route. */
     suspend fun genres(handle: Handle): Result<List<AppleGenre>> =
@@ -446,44 +466,76 @@ internal fun AppleItem.browseIdOf(): String? = when (type.lowercase()) {
 internal fun AppleEditorialItem.toShelfItem(handle: AppleSources.Handle): ShelfItem? {
     if (name.isBlank()) return null
     return when (type.lowercase()) {
-        "songs" -> ShelfItem(
+        "song", "songs" -> ShelfItem(
             title = name,
             subtitle = artistName,
             thumbnailUrl = artworkURL,
             videoId = SourceRegistry.trackKey(handle.configId, id),
             browseId = null,
         )
-        "album" -> ShelfItem(
+        "album", "albums" -> ShelfItem(
             title = name,
             subtitle = artistName,
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = AppleSources.ALBUM_PREFIX + id,
         )
-        "playlist" -> ShelfItem(
+        "playlist", "playlists" -> ShelfItem(
             title = name,
             subtitle = artistName,
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = AppleSources.CPAGE_PREFIX + id,
         )
-        "station" -> ShelfItem(
+        "station", "stations" -> ShelfItem(
             title = name,
             subtitle = artistName,
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = AppleSources.STATION_PREFIX + id,
         )
-        "artist" -> ShelfItem(
+        "artist", "artists" -> ShelfItem(
             title = name,
             subtitle = artistName,
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = AppleSources.ARTIST_PREFIX + id,
         )
+        "curator", "curators" -> ShelfItem(
+            title = name,
+            subtitle = artistName,
+            thumbnailUrl = artworkURL,
+            videoId = null,
+            browseId = AppleSources.CURATOR_PREFIX + id,
+        )
+        "apple-curator", "apple-curators" -> ShelfItem(
+            title = name,
+            subtitle = artistName,
+            thumbnailUrl = artworkURL,
+            videoId = null,
+            browseId = AppleSources.GENRE_PREFIX + id,
+        )
+        "music-video", "music-videos",
+        "uploaded-video", "uploaded-videos",
+        "music-movie", "music-movies" -> ShelfItem(
+            title = name,
+            subtitle = artistName,
+            thumbnailUrl = artworkURL,
+            videoId = null,
+            browseId = null,
+            // Apple does not expose an audio stream contract for these ids.
+            // Open the real video/movie page instead of pretending it is a song.
+            externalUrl = url?.takeIf { it.startsWith("https://music.apple.com/") },
+        )
         else -> null
     }
 }
+
+/** Apple's feature-card metadata stays attached to its real destination. */
+internal fun AppleEditorialItem.toEditorialHero(handle: AppleSources.Handle): EditorialHero? =
+    toShelfItem(handle)?.let { item ->
+        EditorialHero(item = item, badge = badge, description = description)
+    }
 
 /** One editorial shelf as a row of the page, or null when it holds nothing. */
 internal fun AppleEditorialShelf.toHomeShelf(handle: AppleSources.Handle): HomeShelf? {

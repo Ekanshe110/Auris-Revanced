@@ -53,6 +53,7 @@ import com.music.bitchord.data.model.AppleLibraryContent
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.DetailPage
+import com.music.bitchord.data.model.EditorialHero
 import com.music.bitchord.data.model.HomeHeader
 import com.music.bitchord.data.model.HomeShelf
 import com.music.bitchord.data.model.isQuickPicksShelfTitle
@@ -4797,6 +4798,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // "Bollywood Radio" and the New page's station shelf drew tiles that
         // opened nothing. The page shows the tracks the station opens with;
         // the radio tab is still where a live one is tuned.
+        if (browseId.startsWith(com.music.bitchord.data.apple.AppleSources.GENRE_PREFIX)) {
+            openAppleGenre(
+                curatorId = browseId.removePrefix(com.music.bitchord.data.apple.AppleSources.GENRE_PREFIX),
+                name = title,
+                artworkUrl = thumbnailUrl,
+            )
+            return
+        }
+        if (browseId.startsWith(com.music.bitchord.data.apple.AppleSources.CURATOR_PREFIX)) {
+            openAppleEditorial(
+                curatorId = browseId.removePrefix(com.music.bitchord.data.apple.AppleSources.CURATOR_PREFIX),
+                name = title,
+                artworkUrl = thumbnailUrl,
+                ordinaryCurator = true,
+            )
+            return
+        }
         if (browseId.startsWith(com.music.bitchord.data.apple.AppleSources.STATION_PREFIX)) {
             val stationId = browseId.removePrefix(
                 com.music.bitchord.data.apple.AppleSources.STATION_PREFIX,
@@ -5157,31 +5175,61 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /**
-     * A genre tile, opened as the page Apple opens: its playlists and albums.
-     */
+    /** A genre tile, opened as the editorial page Apple publishes for it. */
     fun openAppleGenre(curatorId: String, name: String, artworkUrl: String? = null) {
+        openAppleEditorial(curatorId, name, artworkUrl, ordinaryCurator = false)
+    }
+
+    /** Apple curators use groupings; ordinary curators use their playlist relationship. */
+    private fun openAppleEditorial(
+        curatorId: String,
+        name: String,
+        artworkUrl: String?,
+        ordinaryCurator: Boolean,
+    ) {
         if (name.isBlank()) return
-        val browseId = "apple:genre:$curatorId"
+        val browseId = if (ordinaryCurator) {
+            com.music.bitchord.data.apple.AppleSources.CURATOR_PREFIX + curatorId
+        } else {
+            com.music.bitchord.data.apple.AppleSources.GENRE_PREFIX + curatorId
+        }
         _detailStack.value += DetailPage(
             browseId = browseId,
             title = name,
             subtitle = "",
-            // The tile's own cover, so the page opens on the art the listener
-            // tapped rather than on an empty hero.
+            // The card's own cover fills the page while Apple's shelves load.
             thumbnailUrl = artworkUrl,
             songs = UiState.Success(emptyList()),
             type = BrowseType.OTHER,
         )
         viewModelScope.launch {
-            val handle = com.music.bitchord.data.apple.AppleSources.handle() ?: return@launch
-            // The tile is the curator; Apple's page behind it is the grouping
-            // the curator names. The addon resolves one from the other and
-            // returns the sections Apple actually draws, in its own order.
-            com.music.bitchord.data.apple.AppleSources.genrePage(handle, curatorId)
-                .onSuccess { shelves ->
-                    setApplePage(browseId, UiState.Success(emptyList()), shelves)
+            val handle = com.music.bitchord.data.apple.AppleSources.handle()
+            if (handle == null) {
+                setApplePage(browseId, UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle)))
+                return@launch
+            }
+            val result = if (ordinaryCurator) {
+                com.music.bitchord.data.apple.AppleSources.curatorPage(handle, curatorId)
+            } else {
+                com.music.bitchord.data.apple.AppleSources.genrePage(handle, curatorId)
+            }
+            result.onSuccess { details ->
+                val empty = details.heroes.isEmpty() && details.shelves.isEmpty()
+                setApplePage(
+                    browseId = browseId,
+                    songs = if (empty) {
+                        UiState.Error(text(R.string.apple_browse_empty))
+                    } else {
+                        UiState.Success(emptyList())
+                    },
+                    sections = details.shelves,
+                    editorialHeroes = details.heroes,
+                )
+            }.onFailure { failure ->
+                if (_detailStack.value.firstOrNull { it.browseId == browseId }?.sections.isNullOrEmpty()) {
+                    setApplePage(browseId, UiState.Error(failure.friendly()))
                 }
+            }
         }
     }
 
@@ -5346,6 +5394,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         browseId: String,
         songs: UiState<List<Song>>,
         sections: List<HomeShelf> = emptyList(),
+        editorialHeroes: List<EditorialHero>? = null,
     ) {
         _detailStack.value = _detailStack.value.map {
             if (it.browseId != browseId) return@map it
@@ -5354,7 +5403,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // them lands afterwards; replacing them with nothing is how a
             // genre came to show a single row.
             val kept = if (sections.isEmpty() && it.sections.isNotEmpty()) it.sections else sections
-            it.copy(songs = songs, sections = kept)
+            it.copy(
+                songs = songs,
+                sections = kept,
+                editorialHeroes = editorialHeroes ?: it.editorialHeroes,
+            )
         }
     }
 

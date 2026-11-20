@@ -379,6 +379,7 @@ private fun AppleShelfCarousel(
                             .longPressMenuClickable(
                                 onClick = { onItemClick(item, shelf.title) },
                                 onLongClick = onItemLongPress?.let { { it(item) } },
+                                enabled = item.videoId != null || item.browseId != null || item.externalUrl != null,
                             ),
                     ) {
                         AsyncImage(

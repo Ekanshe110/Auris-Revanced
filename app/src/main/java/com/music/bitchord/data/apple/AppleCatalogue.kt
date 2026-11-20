@@ -117,9 +117,14 @@ object AppleCatalogue {
         stationId: String,
         limit: Int = 20,
     ): Result<List<AppleItem>> =
-        post(
+        // A catalogue station — the ones on Top Stations and Stations by
+        // Genre — is not one of the listener's own. `/me/stations/next-tracks`
+        // only answers for a station the account started, so it came back
+        // empty for every ra.… tile and the tap did nothing. The addon's
+        // station route reads the catalogue station by id.
+        get(
             baseUrl,
-            listOf("me", "stations", "next-tracks", stationId),
+            listOf("radio", "station", stationId, "tracks"),
             mapOf("limit" to limit.toString()),
             AppleRecommendationResponse.serializer(),
         ).map { it.tracks }

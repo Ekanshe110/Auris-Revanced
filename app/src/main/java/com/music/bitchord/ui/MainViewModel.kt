@@ -5328,7 +5328,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sections: List<HomeShelf> = emptyList(),
     ) {
         _detailStack.value = _detailStack.value.map {
-            if (it.browseId == browseId) it.copy(songs = songs, sections = sections) else it
+            if (it.browseId != browseId) return@map it
+            // A page that already has its shelves keeps them. The genre page
+            // fills in ten sections and a loader that knows nothing about
+            // them lands afterwards; replacing them with nothing is how a
+            // genre came to show a single row.
+            val kept = if (sections.isEmpty() && it.sections.isNotEmpty()) it.sections else sections
+            it.copy(songs = songs, sections = kept)
         }
     }
 

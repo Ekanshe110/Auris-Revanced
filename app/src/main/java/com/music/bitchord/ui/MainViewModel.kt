@@ -3509,14 +3509,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess { shelves ->
                     if (!isCurrentHomeLoad(identity, generation)) return@onSuccess
                     if (shelves.isEmpty()) {
-                        _home.value = UiState.Error(text(R.string.apple_home_empty))
+                        // A refresh that comes back empty is a failed read,
+                        // not a page with nothing on it: the rows already on
+                        // screen stay, because replacing them with an error
+                        // is what made Home vanish on pull-to-refresh.
+                        if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
+                            _home.value = UiState.Error(text(R.string.apple_home_empty))
+                        }
                         return@onSuccess
                     }
                     _homeHeader.value = null
                     publishHomeShelves(shelves)
                 }
                 .onFailure { failure ->
-                    if (isCurrentHomeLoad(identity, generation)) {
+                    if (!isCurrentHomeLoad(identity, generation)) return@onFailure
+                    // Same rule as an empty answer: keep a page that is
+                    // already drawn, so a failed refresh cannot erase it.
+                    if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
                         _home.value = UiState.Error(failure.friendly())
                     }
                 }

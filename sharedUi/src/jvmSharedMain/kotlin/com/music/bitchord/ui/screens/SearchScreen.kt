@@ -1104,8 +1104,8 @@ private fun GenreCard(genre: GenreTile, modifier: Modifier, onClick: () -> Unit)
     val art = genre.artworkUrl
     Box(
         modifier = modifier
-            .aspectRatio(1.9f)
-            .clip(RoundedCornerShape(AppleTokens.CornerLarge))
+            .aspectRatio(AppleTokens.SearchTileAspect)
+            .clip(RoundedCornerShape(AppleTokens.CornerMedium))
             .clickable(onClick = onClick)
             // A Brush on both branches: an artwork tile sits on a transparent
             // gradient rather than a Color, which would make the argument
@@ -1137,8 +1137,10 @@ private fun GenreCard(genre: GenreTile, modifier: Modifier, onClick: () -> Unit)
         )
         Text(
             text = genre.name,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontSize = AppleTokens.TileLabelSize,
+            ),
+            fontWeight = FontWeight.Medium,
             color = Color.White,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,

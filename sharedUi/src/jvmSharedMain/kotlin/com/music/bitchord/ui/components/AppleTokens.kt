@@ -1,6 +1,7 @@
 package com.music.bitchord.ui.components
 
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 /**
  * The measurements Apple Music's own app is built from.
@@ -35,6 +36,16 @@ object AppleTokens {
 
     /** `radio_live_tile_corner_radius` — live station tiles. */
     val LiveTileRadius = 20.dp
+
+    /**
+     * `search_landing_title_item_aspect_ratio` — the genre wall's tile.
+     *
+     * 1.777, i.e. 16:9, which is wider than the 1.9 the wall was drawn at.
+     */
+    const val SearchTileAspect = 1.777f
+
+    /** `Headline` — the size Apple labels a tile with. */
+    val TileLabelSize = 17.sp
 
     /** `search_filter_height` — the filter pills above results. */
     val SearchFilterHeight = 42.dp

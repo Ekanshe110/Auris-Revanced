@@ -360,9 +360,9 @@ fun SearchScreen(
                         item { GenreGrid(genres = genres, onGenreClick = onGenreClick) }
                     }
                     if (!searching && catalogue.isNotEmpty()) {
-                        catalogue.forEach { shelf ->
-                            if (shelf.items.isEmpty()) return@forEach
-                            item(key = "catalogue:heading:${shelf.title}") {
+                        catalogue.forEachIndexed { shelfIndex, shelf ->
+                            if (shelf.items.isEmpty()) return@forEachIndexed
+                            item(key = "catalogue:heading:$shelfIndex:${shelf.title}") {
                                 Text(
                                     text = shelf.title,
                                     modifier = Modifier.padding(
@@ -380,7 +380,7 @@ fun SearchScreen(
                             // covers with the title and the artist under it,
                             // not a scanner of rows.
                             shelf.items.chunked(2).forEachIndexed { rowIndex, pair ->
-                                item(key = "catalogue:row:${shelf.title}:$rowIndex") {
+                                item(key = "catalogue:row:$shelfIndex:${shelf.title}:$rowIndex") {
                                     Row(
                                         Modifier
                                             .fillMaxWidth()

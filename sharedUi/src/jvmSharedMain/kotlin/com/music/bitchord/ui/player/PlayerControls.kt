@@ -25,7 +25,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -505,7 +507,7 @@ private const val QUALITY_BADGE_ALPHA = 0.82f
  * Null where the platform has no playback service to switch, in which case the
  * badge keeps its ordinary look.
  */
-val LocalRenditionSwitch = compositionLocalOf<((String) -> Unit)?> { null }
+val LocalRenditionSwitch = compositionLocalOf<((Boolean) -> Unit)?> { null }
 
 /**
  * The quality badge between the timestamps — "Lossless", "Hi-Res", a loading
@@ -517,6 +519,7 @@ val LocalRenditionSwitch = compositionLocalOf<((String) -> Unit)?> { null }
  * [QUALITY_STATS_HOLD_MS] — because a tap that means two different things
  * means neither.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PlaybackQualityLabel(
     song: Song,
@@ -545,50 +548,46 @@ internal fun PlaybackQualityLabel(
     // answer to ask for — two different claims, and the cue only appears when
     // there is one.
     val switchRendition = LocalRenditionSwitch.current
-    val currentRendition = when {
-        nerdStats?.isDolbyAtmos == true -> "atmos"
-        nerdStats?.isHiRes == true -> "hires"
-        nerdStats?.isLossless == true -> "lossless"
-        else -> null
-    }
-    val targetRendition = when (currentRendition) {
-        "atmos" -> if (song.atmosAvailable) "lossless" else null
-        "hires" -> if (song.hiResAvailable) "lossless" else null
-        "lossless" -> when {
-            song.atmosAvailable -> "atmos"
-            song.hiResAvailable -> "hires"
-            else -> null
-        }
-        else -> null
-    }
-    val renditionSwitchable = switchRendition != null && targetRendition != null
-    Box(modifier = modifier.fillMaxHeight(), contentAlignment = Alignment.Center) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    // A playing Atmos stream can always switch down to lossless; a lossless
+    // stream offers the switch only when the catalogue says an Atmos mix
+    // exists.
+    val renditionSwitchable = switchRendition != null &&
+        (nerdStats?.isDolbyAtmos == true ||
+            (song.atmosAvailable && nerdStats?.isLossless == true))
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier.then(
+                if (renditionSwitchable) {
+                    Modifier.combinedClickable(
+                        onClick = {
+                            // The badge states what is playing; the tap asks
+                            // for the other mix of the same recording, at the
+                            // same position.
+                            switchRendition?.invoke(nerdStats?.isDolbyAtmos != true)
+                        },
+                        onLongClick = { if (nerdStats != null) details = true },
+                    )
+                } else {
+                    Modifier.clickable(enabled = nerdStats != null) { details = true }
+                },
+            ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             LosslessOrStats(
                 isLoading = isLoading,
                 stillRacing = song.videoId in racingLossless,
-                losslessRequested = effectiveQuality == AudioQuality.LOSSLESS,
+                losslessRequested = effectiveQuality == AudioQuality.LOSSLESS ||
+                    effectiveQuality == AudioQuality.DOLBY,
                 effectiveQuality = effectiveQuality,
                 nerdStats = nerdStats,
-                // The whole slot's height, and some width either side of the word,
-                // is the target. The padding is inside the gesture so it adds to
-                // what a finger can hit. See [SCRUBBER_LABEL_SLOT].
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .qualityBadgeGestures(
-                        onHold = { details = true },
-                        onTap = {
-                            if (renditionSwitchable) switchRendition?.invoke(targetRendition)
-                        },
-                    )
-                    .padding(horizontal = QUALITY_BADGE_TAP_PADDING),
+                modifier = Modifier,
             )
             if (renditionSwitchable) {
                 Text(
-                    text = "›",
+                    text = "\u203A",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 2.dp, end = QUALITY_BADGE_TAP_PADDING),
+                    modifier = Modifier.padding(start = 2.dp),
                 )
             }
         }

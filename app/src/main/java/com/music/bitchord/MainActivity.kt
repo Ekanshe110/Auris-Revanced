@@ -2951,18 +2951,18 @@ private fun BitChordApp(
         // the service is the app's own — the shared UI only knows that some
         // host can be asked.
         CompositionLocalProvider(
-            LocalRenditionSwitch provides { rendition ->
+            LocalRenditionSwitch provides { wantsAtmos ->
                 // Dolby Atmos is a different file, and a device with no
                 // spatial decoder cannot play it. Asking anyway would leave
                 // the listener with a tap that changes nothing, so the reason
                 // is said out loud instead.
-                if (rendition == "atmos" &&
+                if (wantsAtmos &&
                     !com.music.bitchord.data.sources.DeviceCodecs.playsDolbyAtmos
                 ) {
                     showQueueNotice(context.getString(R.string.atmos_not_supported))
                     return@provides
                 }
-                controller?.switchRendition(rendition)
+                controller?.switchRendition(if (wantsAtmos) "atmos" else "lossless")
             },
         ) {
         NowPlayingScreen(

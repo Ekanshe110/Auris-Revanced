@@ -333,15 +333,9 @@ fun SearchScreen(
                 }
                 results == null -> {
                     if (searching) {
-                        if (recentlyPlayed.isNotEmpty()) {
-                            recentlyPlayedRows(
-                                songs = recentlyPlayed,
-                                title = recentlyPlayedTitle,
-                                currentSong = currentSong,
-                                isPlaying = isPlaying,
-                                onClick = { index -> onSongClick(recentlyPlayed, index) },
-                            )
-                        }
+                        // Apple's page, once the field is tapped: recently
+                        // searched, with a Clear at the heading. No recently
+                        // played rows and no second list under it.
                         if (history.isNotEmpty()) {
                             recentSearches(
                                 history = history,
@@ -352,61 +346,14 @@ fun SearchScreen(
                                 onClear = onHistoryClear,
                             )
                         }
-                        if (history.isEmpty() && recentlyPlayed.isEmpty()) {
+                        if (history.isEmpty()) {
                             item { MessageState(stringResource(Res.string.search_empty)) }
                         }
                     }
                     if (genres.isNotEmpty()) {
                         item { GenreGrid(genres = genres, onGenreClick = onGenreClick) }
                     }
-                    if (!searching && catalogue.isNotEmpty()) {
-                        catalogue.forEachIndexed { shelfIndex, shelf ->
-                            if (shelf.items.isEmpty()) return@forEachIndexed
-                            item(key = "catalogue:heading:$shelfIndex:${shelf.title}") {
-                                Text(
-                                    text = shelf.title,
-                                    modifier = Modifier.padding(
-                                        start = PAGE_GUTTER,
-                                        end = PAGE_GUTTER,
-                                        top = 18.dp,
-                                        bottom = 8.dp,
-                                    ),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-                            // Two across, the way the vendor's own browse
-                            // page draws a catalogue: a grid of square
-                            // covers with the title and the artist under it,
-                            // not a scanner of rows.
-                            shelf.items.chunked(2).forEachIndexed { rowIndex, pair ->
-                                item(key = "catalogue:row:$shelfIndex:${shelf.title}:$rowIndex") {
-                                    Row(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(
-                                                start = PAGE_GUTTER,
-                                                end = PAGE_GUTTER,
-                                                bottom = AppleTokens.GridGutter,
-                                            ),
-                                    ) {
-                                        pair.forEachIndexed { index, entry ->
-                                            CatalogueCard(
-                                                item = entry,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { onCatalogueClick(entry) },
-                                            )
-                                            if (index != pair.lastIndex) {
-                                                Spacer(Modifier.width(AppleTokens.GridGutter))
-                                            }
-                                        }
-                                        if (pair.size == 1) Spacer(Modifier.weight(1f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (genres.isEmpty() && catalogue.isEmpty() && !searching) {
+                    if (genres.isEmpty() && !searching) {
                         item { MessageState(stringResource(Res.string.search_empty)) }
                     }
                 }

@@ -319,15 +319,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _appleLibrary.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
                 return@launch
             }
-            val playlists = com.music.bitchord.data.apple.AppleSources.libraryPlaylists(handle)
-                .getOrElse { failure ->
-                    _appleLibrary.value = UiState.Error(failure.friendly())
-                    return@launch
-                }
-            val albums = com.music.bitchord.data.apple.AppleSources.libraryAlbums(handle)
-                .getOrDefault(emptyList())
-            val songs = com.music.bitchord.data.apple.AppleSources.librarySongs(handle)
-                .getOrDefault(emptyList())
+            // The three collections are independent, and each is a walk of
+            // several pages: run them together rather than one after another,
+            // which is what made the Library tab sit on a spinner.
+            val playlistsJob = async {
+                com.music.bitchord.data.apple.AppleSources.libraryPlaylists(handle)
+            }
+            val albumsJob = async {
+                com.music.bitchord.data.apple.AppleSources.libraryAlbums(handle)
+            }
+            val songsJob = async {
+                com.music.bitchord.data.apple.AppleSources.librarySongs(handle)
+            }
+            val playlists = playlistsJob.await().getOrElse { failure ->
+                _appleLibrary.value = UiState.Error(failure.friendly())
+                return@launch
+            }
+            val albums = albumsJob.await().getOrDefault(emptyList())
+            val songs = songsJob.await().getOrDefault(emptyList())
             _appleLibrary.value = if (playlists.isEmpty() && albums.isEmpty() && songs.isEmpty()) {
                 UiState.Error(text(R.string.apple_library_empty))
             } else {

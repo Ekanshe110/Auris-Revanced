@@ -220,26 +220,6 @@ internal object AppleSources {
      */
     suspend fun browseShelves(handle: Handle): Result<List<HomeShelf>> {
         val shelves = mutableListOf<HomeShelf>()
-        // The listener's own groups, split by what they hold: Apple's own
-        // playlists and Apple's own albums.
-        AppleCatalogue.home(handle.baseUrl).getOrNull()?.shelves?.forEach { shelf ->
-            val playlists = shelf.items.filter { it.type == "playlist" }
-            if (playlists.isNotEmpty()) {
-                shelves += HomeShelf(
-                    title = shelf.title,
-                    subtitle = shelf.subtitle,
-                    items = playlists.map { it.shelfItem(handle.configId) }.filterNotNull(),
-                )
-            }
-            val albums = shelf.items.filter { it.type == "album" }
-            if (albums.isNotEmpty()) {
-                shelves += HomeShelf(
-                    title = shelf.title,
-                    subtitle = shelf.subtitle,
-                    items = albums.map { it.shelfItem(handle.configId) }.filterNotNull(),
-                )
-            }
-        }
         // Apple's own New page: every shelf it publishes, in its order, with
         // the lockups it actually draws. A song carries the catalogue's own
         // key, so it plays; albums and playlists open their pages. Only the

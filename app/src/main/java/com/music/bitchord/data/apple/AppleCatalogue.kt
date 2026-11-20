@@ -303,7 +303,12 @@ object AppleCatalogue {
         get(
             baseUrl,
             listOf("browse", "page"),
-            mapOf("page" to page),
+            // A nonce, so a refresh asks the network rather than whatever the
+            // HTTP layer still holds. The New page is rebuilt from the addon
+            // each time it opens; a cached answer that predates a catalogue
+            // change is how the page came back with two shelves instead of
+            // the seventeen the addon serves.
+            mapOf("page" to page, "n" to System.currentTimeMillis().toString()),
             AppleEditorialPage.serializer(),
         )
 

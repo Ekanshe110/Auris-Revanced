@@ -308,6 +308,55 @@ private fun AppleShelfCarousel(
                     bottom = 8.dp,
                 ),
         )
+        // A shelf of songs is a list, not a row of cards: Apple draws "Best
+        // New Songs" as tracks with a cover, a title and an artist, because
+        // songs are played one at a time and scanned vertically. A cover you
+        // swipe past says nothing about which song it is.
+        if (shelf.items.isNotEmpty() && shelf.items.all { it.videoId != null }) {
+            shelf.items.forEach { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onItemClick(item, shelf.title) }
+                        .padding(horizontal = PAGE_GUTTER, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(AppleTokens.CornerSmall))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        if (item.thumbnailUrl != null) {
+                            AsyncImage(
+                                model = item.thumbnailUrl,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = item.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            return@Column
+        }
         LazyRow(
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(horizontal = PAGE_GUTTER),

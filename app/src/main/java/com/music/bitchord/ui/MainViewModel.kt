@@ -308,50 +308,92 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _appleLibrary = MutableStateFlow<UiState<AppleLibraryContent>>(UiState.Loading)
     val appleLibrary: StateFlow<UiState<AppleLibraryContent>> = _appleLibrary.asStateFlow()
 
-    /**
-     * Reads Apple's library: the playlists, the albums and the songs, each
-     * as the rows Apple's own page draws them.
-     */
+    private val appleLibraryGeneration = AtomicLong(0L)
+    private var appleLibraryJob: Job? = null
+
+    /** Loads the landing page once; repeated visibility callbacks share in-flight work. */
     fun loadAppleLibrary() {
-        _appleLibrary.value = UiState.Loading
-        viewModelScope.launch {
-            val handle = com.music.bitchord.data.apple.AppleSources.handle()
-            if (handle == null) {
-                _appleLibrary.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
-                return@launch
+        if (appleLibraryJob?.isActive == true) return
+        val generation = appleLibraryGeneration.incrementAndGet()
+        appleLibraryJob = viewModelScope.launch {
+            try {
+                readAppleLibrary(generation)
+            } finally {
+                if (appleLibraryGeneration.get() == generation) appleLibraryJob = null
             }
-            // The three collections are independent, and each is a walk of
-            // several pages: run them together rather than one after another,
-            // which is what made the Library tab sit on a spinner.
-            val playlistsJob = async {
-                com.music.bitchord.data.apple.AppleSources.libraryPlaylists(handle)
+        }
+    }
+
+    /** A pull-to-refresh awaits Apple itself rather than a fire-and-forget loader. */
+    private suspend fun refreshAppleLibrary() {
+        appleLibraryJob?.takeIf { it.isActive }?.let {
+            it.join()
+            return
+        }
+        val generation = appleLibraryGeneration.incrementAndGet()
+        appleLibraryJob = kotlinx.coroutines.currentCoroutineContext()[Job]
+        try {
+            readAppleLibrary(generation)
+        } finally {
+            if (appleLibraryGeneration.get() == generation) appleLibraryJob = null
+        }
+    }
+
+    private suspend fun readAppleLibrary(generation: Long) {
+        // Apple queries at most 66 albums and 66 containers for Recently Added.
+        // Both real lists are merged by Apple's timestamps; none is cut to an
+        // arbitrary eight-card preview and no Songs request is needed here.
+        val retained = (_appleLibrary.value as? UiState.Success)?.data
+        if (retained == null) _appleLibrary.value = UiState.Loading
+        val handle = com.music.bitchord.data.apple.AppleSources.handle()
+        if (generation != appleLibraryGeneration.get()) return
+        if (handle == null) {
+            if (retained == null) {
+                _appleLibrary.value = UiState.Error(
+                    text(R.string.provider_apple_manifest_missing_subtitle),
+                )
             }
-            val albumsJob = async {
-                com.music.bitchord.data.apple.AppleSources.libraryAlbums(handle)
+            return
+        }
+        val (playlistsResult, albumsResult) = coroutineScope {
+            val playlists = async {
+                com.music.bitchord.data.apple.AppleSources.libraryPlaylistPage(handle, limit = 66)
             }
-            val songsJob = async {
-                com.music.bitchord.data.apple.AppleSources.librarySongs(handle)
+            val albums = async {
+                com.music.bitchord.data.apple.AppleSources.libraryAlbumPage(handle, limit = 66)
             }
-            val playlists = playlistsJob.await().getOrElse { failure ->
-                _appleLibrary.value = UiState.Error(failure.friendly())
-                return@launch
-            }
-            val albums = albumsJob.await().getOrDefault(emptyList())
-            val songs = songsJob.await().getOrDefault(emptyList())
-            _appleLibrary.value = if (playlists.isEmpty() && albums.isEmpty() && songs.isEmpty()) {
-                UiState.Error(text(R.string.apple_library_empty))
-            } else {
-                UiState.Success(
+            playlists.await() to albums.await()
+        }
+        if (generation != appleLibraryGeneration.get()) return
+        val playlists = playlistsResult.getOrNull()?.items.orEmpty()
+        val albums = albumsResult.getOrNull()?.items.orEmpty()
+        val failure = playlistsResult.exceptionOrNull() ?: albumsResult.exceptionOrNull()
+        when {
+            playlistsResult.isSuccess && albumsResult.isSuccess -> {
+                _appleLibrary.value = UiState.Success(
                     AppleLibraryContent(
-                        // Apple's own order is kept: what was added recently
-                        // comes first, and the list below is the whole of it.
-                        recentlyAdded = playlists.take(8),
-                        albums = albums,
-                        songs = songs,
-                        playlists = playlists,
+                        recentlyAdded = com.music.bitchord.data.apple.appleRecentlyAdded(
+                            playlists,
+                            albums,
+                        ),
                     ),
                 )
             }
+            retained != null -> Unit // A failed refresh never erases the last valid page.
+            playlists.isNotEmpty() || albums.isNotEmpty() -> {
+                // A partial first reading is useful, but never call it an empty library.
+                _appleLibrary.value = UiState.Success(
+                    AppleLibraryContent(
+                        recentlyAdded = com.music.bitchord.data.apple.appleRecentlyAdded(
+                            playlists,
+                            albums,
+                        ),
+                    ),
+                )
+            }
+            else -> _appleLibrary.value = UiState.Error(
+                failure?.friendly() ?: text(R.string.something_went_wrong),
+            )
         }
     }
 
@@ -492,8 +534,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * or a song. No Flow and no "search a station" — neither is Apple's, and
      * a page that offers them is not Apple's page.
      */
-    private val _appleRadio = MutableStateFlow<UiState<List<RadioStation>>>(UiState.Loading)
-    val appleRadio: StateFlow<UiState<List<RadioStation>>> = _appleRadio.asStateFlow()
+    private val _appleRadio =
+        MutableStateFlow<UiState<List<com.music.bitchord.data.model.AppleEditorialElement>>>(UiState.Loading)
+    val appleRadio: StateFlow<UiState<List<com.music.bitchord.data.model.AppleEditorialElement>>> =
+        _appleRadio.asStateFlow()
 
     /**
      * The stations other broadcasters run, for the Radio page under Apple's
@@ -514,54 +558,40 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val appleRadioShelvesList: List<com.music.bitchord.data.model.AppleRadioShelf>
         get() = (_appleRadioShelves.value as? UiState.Success)?.data.orEmpty()
 
-    private val _appleInternationalRadio = MutableStateFlow<UiState<List<RadioStation>>>(UiState.Loading)
-    val appleInternationalRadio: StateFlow<UiState<List<RadioStation>>> =
-        _appleInternationalRadio.asStateFlow()
-
-    /**
-     * Reads Apple's stations: the listener's own, the editorial ones and the
-     * live ones, in Apple's own order.
-     */
+    /** Reads Radio's ordered grouping; legacy shelves are only a fallback. */
     fun loadAppleRadio() {
-        _appleRadio.value = UiState.Loading
-        viewModelScope.launch {
-            val handle = com.music.bitchord.data.apple.AppleSources.handle()
-            if (handle == null) {
-                _appleRadio.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
-                return@launch
-            }
-            val stations = com.music.bitchord.data.apple.AppleSources.stations(handle)
-                .getOrElse { failure ->
-                    _appleRadio.value = UiState.Error(failure.friendly())
-                    return@launch
-                }
-            val live = com.music.bitchord.data.apple.AppleSources.liveStations(handle).getOrDefault(emptyList())
-            val rows = (stations + live).distinctBy { it.id }.map { it.station() }
-            _appleRadio.value = if (rows.isEmpty()) {
-                UiState.Error(text(R.string.apple_radio_empty))
-            } else {
-                UiState.Success(rows)
-            }
-            // The international row is read alongside: a page that showed
-            // Apple's own stations and left the others out would be a
-            // shorter page than Apple's, and the others are live too.
-            com.music.bitchord.data.apple.AppleSources.internationalStations(handle)
-                .onSuccess { international ->
-                    _appleInternationalRadio.value = UiState.Success(international)
-                }
-                .onFailure {
-                    _appleInternationalRadio.value = UiState.Success(emptyList())
-                }
-            // Apple's own sections of the page: the stations by genre, the
-            // sessions, the mixes, the interviews and the shows.
-            com.music.bitchord.data.apple.AppleSources.radioShelves(handle)
-                .onSuccess { shelves ->
-                    _appleRadioShelves.value = UiState.Success(shelves)
-                }
-                .onFailure {
-                    _appleRadioShelves.value = UiState.Success(emptyList())
-                }
+        viewModelScope.launch { fetchAppleRadio(refresh = false) }
+    }
+
+    private suspend fun fetchAppleRadio(refresh: Boolean) {
+        if (_appleRadio.value !is UiState.Success) _appleRadio.value = UiState.Loading
+        val handle = com.music.bitchord.data.apple.AppleSources.handle()
+        if (handle == null) {
+            _appleRadio.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
+            return
         }
+        val editorial = com.music.bitchord.data.apple.AppleSources.radioElements(handle, refresh)
+        editorial.onSuccess { elements ->
+            if (elements.isNotEmpty()) {
+                _appleRadioShelves.value = UiState.Success(emptyList())
+                _appleRadio.value = UiState.Success(elements)
+                return
+            }
+        }
+        com.music.bitchord.data.apple.AppleSources.radioShelves(handle)
+            .onSuccess { shelves ->
+                if (shelves.isNotEmpty()) {
+                    _appleRadioShelves.value = UiState.Success(shelves)
+                    _appleRadio.value = UiState.Success(emptyList())
+                    return
+                }
+                _appleRadio.value = UiState.Error(
+                    editorial.exceptionOrNull()?.friendly() ?: text(R.string.apple_radio_empty),
+                )
+            }
+            .onFailure { failure ->
+                _appleRadio.value = UiState.Error(failure.friendly())
+            }
     }
 
     /**
@@ -606,12 +636,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var appleGenresRequested = false
 
-    private val _appleDirectory =
-        MutableStateFlow<List<Pair<String, String>>>(emptyList())
-
-    /** The New page's directory rows, as the addon publishes them. */
-    val appleDirectory: StateFlow<List<Pair<String, String>>> = _appleDirectory.asStateFlow()
-
     /**
      * Genres are read the first time the search page is opened: a listener
      * who never searches should not pay for the request.
@@ -636,33 +660,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _appleBrowse = MutableStateFlow<UiState<List<HomeShelf>>>(UiState.Loading)
     val appleBrowse: StateFlow<UiState<List<HomeShelf>>> = _appleBrowse.asStateFlow()
 
-    /**
-     * Reads Apple's browse groups for the New tab.
-     */
-    fun loadAppleBrowse() {        _appleBrowse.value = UiState.Loading
+    private val _appleBrowseElements =
+        MutableStateFlow<List<com.music.bitchord.data.model.AppleEditorialElement>>(emptyList())
+    val appleBrowseElements: StateFlow<List<com.music.bitchord.data.model.AppleEditorialElement>> =
+        _appleBrowseElements.asStateFlow()
+
+    private val _appleBrowseRefreshing = MutableStateFlow(false)
+    val appleBrowseRefreshing: StateFlow<Boolean> = _appleBrowseRefreshing.asStateFlow()
+
+    /** Reads New's ordered editorial page, retaining content during refresh. */
+    fun loadAppleBrowse(refresh: Boolean = false) {
+        if (_appleBrowseRefreshing.value) return
+        _appleBrowseRefreshing.value = true
         viewModelScope.launch {
-            val handle = com.music.bitchord.data.apple.AppleSources.handle()
-            if (handle == null) {
-                _appleBrowse.value =
-                    UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
-                return@launch
+            try {
+                fetchAppleBrowse(refresh)
+            } finally {
+                _appleBrowseRefreshing.value = false
             }
-            com.music.bitchord.data.apple.AppleSources.browseDirectory(handle)
-                .onSuccess { rows ->
-                    _appleDirectory.value = rows.map { it.label to it.term }
+        }
+    }
+
+    private suspend fun fetchAppleBrowse(refresh: Boolean) {
+        if (_appleBrowse.value !is UiState.Success) _appleBrowse.value = UiState.Loading
+        val handle = com.music.bitchord.data.apple.AppleSources.handle()
+        if (handle == null) {
+            _appleBrowse.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
+            return
+        }
+        com.music.bitchord.data.apple.AppleSources.browseContent(handle, refresh)
+            .onSuccess { content ->
+                _appleBrowseElements.value = content.elements
+                _appleBrowse.value = if (content.shelves.isEmpty() && content.elements.isEmpty()) {
+                    UiState.Error(text(R.string.apple_browse_empty))
+                } else {
+                    UiState.Success(content.shelves)
                 }
-            com.music.bitchord.data.apple.AppleSources.browseShelves(handle)
-                .onSuccess { shelves ->
-                    _appleBrowse.value = if (shelves.isEmpty()) {
-                        UiState.Error(text(R.string.apple_browse_empty))
-                    } else {
-                        UiState.Success(shelves)
-                    }
-                }
-                .onFailure { failure ->
+            }
+            .onFailure { failure ->
+                if (_appleBrowse.value !is UiState.Success) {
                     _appleBrowse.value = UiState.Error(failure.friendly())
                 }
-        }
+            }
     }
 
     /**
@@ -2706,7 +2745,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // Under Apple's look the page is Apple's library: the listener's own
         // playlists, read through the installed manifest.
         if (AppSettings.providerAxes.value.ui == MusicProvider.APPLE) {
-            loadAppleLibrary()
+            val needed = libraryStale || _appleLibrary.value !is UiState.Success
+            if (needed) {
+                libraryStale = false
+                loadAppleLibrary()
+            }
             return
         }
         loadPlaylists()
@@ -2855,6 +2898,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * isn't fetched and parsed again to move one shelf.
      */
     private fun refreshHomeRecents() {
+        // Apple's Recently Played shelf arrives inside Listen Now. Never prepend
+        // a YouTube shelf to Apple's page or reorder it after a playback event.
+        if (AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE) return
         if (!_signedIn.value) return
         val identity = listenerKey()
         val generation = homeLoadGeneration.get()
@@ -2916,29 +2962,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun refresh(feed: Feed) {
         if (feed in _refreshing.value) return
-        if (feed == Feed.LIBRARY && !_signedIn.value) return
+        val appleLibrary = feed == Feed.LIBRARY &&
+            AppSettings.providerAxes.value.ui == MusicProvider.APPLE
+        // Google auth belongs to YouTube Library, not to an Apple addon session.
+        if (feed == Feed.LIBRARY && !appleLibrary && !_signedIn.value) return
         val identity = listenerKey()
         if (feed == Feed.EXPLORE) exploreRequested = true
         _refreshing.value = _refreshing.value + feed
         viewModelScope.launch {
-            when (feed) {
-                Feed.HOME -> refreshHome(identity)
-                Feed.EXPLORE -> if (AppSettings.providerAxes.value.ui == MusicProvider.APPLE) {
-                    loadAppleRadio()
-                } else {
-                    fetchExplore()
+            try {
+                when (feed) {
+                    Feed.HOME -> refreshHome(identity)
+                    Feed.EXPLORE -> if (AppSettings.providerAxes.value.ui == MusicProvider.APPLE) {
+                        fetchAppleRadio(refresh = true)
+                    } else {
+                        fetchExplore()
+                    }
+                    Feed.LIBRARY -> if (appleLibrary) {
+                        refreshAppleLibrary()
+                    } else {
+                        fetchLibrary(identity)
+                    }
+                    Feed.PODCASTS -> {
+                        fetchPodcasts()
+                        ensurePodcastSectionsFetched(force = true)
+                    }
                 }
-                Feed.LIBRARY -> if (AppSettings.providerAxes.value.ui == MusicProvider.APPLE) {
-                    loadAppleLibrary()
-                } else {
-                    fetchLibrary(identity)
-                }
-                Feed.PODCASTS -> {
-                    fetchPodcasts()
-                    ensurePodcastSectionsFetched(force = true)
-                }
+            } finally {
+                _refreshing.value = _refreshing.value - feed
             }
-            _refreshing.value = _refreshing.value - feed
         }
     }
 
@@ -3235,14 +3287,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun loadHome() {
         val identity = listenerKey()
         val generation = homeLoadGeneration.incrementAndGet()
-        _home.value = UiState.Loading
+        val appleHome = AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE
+        // Apple reloads are atomic: the last valid page stays visible until a
+        // nonempty replacement arrives. Other providers retain their existing
+        // progressive-loading lifecycle.
+        if (!appleHome || _home.value !is UiState.Success) _home.value = UiState.Loading
         homeContinuation = null
         homeSeenTitles.clear()
-        _homeShelfTitles.value = emptyList()
-        _homeQuickPicksItems.value = emptyList()
-        _homeRaw.value = emptyList()
-        homeCachedRaw = null
-        _homeShowingCached.value = false
+        if (!appleHome) {
+            _homeShelfTitles.value = emptyList()
+            _homeQuickPicksItems.value = emptyList()
+            _homeRaw.value = emptyList()
+            homeCachedRaw = null
+            _homeShowingCached.value = false
+        }
         // The header is *kept* while the page reloads. The chips in it are the
         // way back to the whole feed: a page that hid them while it loaded —
         // and again when the load failed — left a listener who had narrowed the
@@ -3282,10 +3340,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // axis that names Apple is a newer promise than a setting that was
         // left on Spotify, and the page must not be Spotify's while the axes
         // say Apple's.
-        if (AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE) {
+        if (appleHome) {
             _homePendingShelves.value = 0
             _homeRecentlyPlayedLoading.value = false
-            loadAppleHome(identity, generation)
+            loadAppleHome(identity, generation, cacheOwner)
             return
         }
         if (AppSettings.homeProvider.value == HomeProvider.SPOTIFY) {
@@ -3403,10 +3461,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } ?: return@launch
             if (!isCurrentHomeLoad(identity, generation)) return@launch
             if (catalogue != homeCatalogue() || homeFacet.value.isNotEmpty()) return@launch
-            // Only into a page still loading: a fresh page is newer, and a
-            // fresh error is this load's answer — a page from yesterday drawn
-            // over it would have nothing left in flight to replace it.
-            if (_home.value !is UiState.Loading || _homeRaw.value.isNotEmpty()) return@launch
+            // A fresh page is newer and must not be covered. Apple's valid
+            // snapshot may still replace an early network error: stale content
+            // is more useful than losing Home while no replacement is available.
+            val appleError = AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE &&
+                _home.value is UiState.Error
+            if ((_home.value !is UiState.Loading && !appleError) || _homeRaw.value.isNotEmpty()) {
+                return@launch
+            }
             val shelves = kept.shelves.withoutBlockedArtists()
             if (shelves.isEmpty()) return@launch
             homeCachedRaw = shelves
@@ -3497,40 +3559,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Music manifest there is no Apple catalogue to read, and the page says
      * so rather than showing another catalogue's rows under Apple's heading.
      */
-    private fun loadAppleHome(identity: String?, generation: Long) {
+    private fun loadAppleHome(identity: String?, generation: Long, cacheOwner: String) {
         homeContinuation = null
-        viewModelScope.launch {
-            val handle = com.music.bitchord.data.apple.AppleSources.handle()
-            if (!isCurrentHomeLoad(identity, generation)) return@launch
-            if (handle == null) {
+        viewModelScope.launch { readAppleHome(identity, generation, cacheOwner) }
+    }
+
+    /** Reads and atomically publishes Apple's complete Home page. */
+    private suspend fun readAppleHome(identity: String?, generation: Long, cacheOwner: String) {
+        val handle = com.music.bitchord.data.apple.AppleSources.handle()
+        if (!isCurrentHomeLoad(identity, generation)) return
+        if (handle == null) {
+            if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
                 _home.value = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle))
-                return@launch
             }
-            com.music.bitchord.data.apple.AppleSources.home(handle)
-                .onSuccess { shelves ->
-                    if (!isCurrentHomeLoad(identity, generation)) return@onSuccess
-                    if (shelves.isEmpty()) {
-                        // A refresh that comes back empty is a failed read,
-                        // not a page with nothing on it: the rows already on
-                        // screen stay, because replacing them with an error
-                        // is what made Home vanish on pull-to-refresh.
-                        if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
-                            _home.value = UiState.Error(text(R.string.apple_home_empty))
-                        }
-                        return@onSuccess
-                    }
-                    _homeHeader.value = null
-                    publishHomeShelves(shelves)
-                }
-                .onFailure { failure ->
-                    if (!isCurrentHomeLoad(identity, generation)) return@onFailure
-                    // Same rule as an empty answer: keep a page that is
-                    // already drawn, so a failed refresh cannot erase it.
-                    if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
-                        _home.value = UiState.Error(failure.friendly())
-                    }
-                }
+            return
         }
+        com.music.bitchord.data.apple.AppleSources.home(handle)
+            .onSuccess { shelves ->
+                if (!isCurrentHomeLoad(identity, generation)) return@onSuccess
+                if (shelves.isEmpty()) {
+                    if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
+                        _home.value = UiState.Error(text(R.string.apple_home_empty))
+                    }
+                    return@onSuccess
+                }
+                _homeHeader.value = null
+                // Replacement, not append/deduplicate: Apple's response is the
+                // whole page, and two real groups may legitimately share a title.
+                _homeRaw.value = shelves
+                homeCachedRaw = null
+                _homeShowingCached.value = false
+                homeSeenTitles.clear()
+                publishHome()
+                keepHomeCache(identity, generation, cacheOwner)
+            }
+            .onFailure { failure ->
+                if (!isCurrentHomeLoad(identity, generation)) return@onFailure
+                // A failed reload never erases rows that are already drawn.
+                if ((_home.value as? UiState.Success)?.data.isNullOrEmpty()) {
+                    _home.value = UiState.Error(failure.friendly())
+                }
+            }
     }
 
     /**
@@ -3657,6 +3726,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * carried along as a row of nothing.
      */
     private fun orderedHomeShelves(shelves: List<HomeShelf>): List<HomeShelf> {
+        if (AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE) {
+            // Quick Picks and YouTube shelf customisation do not belong to
+            // Apple's page. Its groups stay complete and in Apple's own order.
+            _homeShelfTitles.value = shelves.map { it.title }
+            _homeQuickPicksItems.value = emptyList()
+            return shelves
+        }
         // Exactly one quick-picks row, and it is there even when the feed
         // came without one: a page missing the row is a page whose first
         // load is a page without it.
@@ -3688,6 +3764,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Refreshes the core feed without blanking the current Play page first. */
     private suspend fun refreshHome(identity: String?) = coroutineScope {
+        if (AppSettings.providerAxes.value.recommendation == MusicProvider.APPLE) {
+            readAppleHome(identity, homeLoadGeneration.get(), homeCacheOwner(identity))
+            return@coroutineScope
+        }
         // Spotify's rows are read rather than continued, so a refresh is the
         // whole of what it does — see [refreshSpotifyHome].
         if (AppSettings.homeProvider.value == HomeProvider.SPOTIFY) {
@@ -5110,70 +5190,137 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * One of Apple's library categories, opened as a page of its own rather
      * than scrolled to on the library page.
      */
+    private val applePageRequests = AtomicLong(0L)
+
     fun openAppleLibrary(collection: String) {
+        if (collection !in APPLE_LIBRARY_COLLECTIONS) return
         val browseId = "apple:library:$collection"
+        if (_detailStack.value.lastOrNull()?.browseId == browseId) return
         val title = when (collection) {
             "playlists" -> text(R.string.playlists)
             "albums" -> text(R.string.albums)
             "artists" -> text(R.string.artists)
-            "songs" -> text(R.string.songs)
-            else -> text(R.string.library)
+            else -> text(R.string.songs)
         }
+        val requestId = applePageRequests.incrementAndGet()
         _detailStack.value += DetailPage(
             browseId = browseId,
             title = title,
             subtitle = "",
             thumbnailUrl = null,
             songs = UiState.Loading,
-            type = BrowseType.OTHER,
+            type = if (collection == "songs") BrowseType.PLAYLIST else BrowseType.OTHER,
+            requestId = requestId,
         )
         viewModelScope.launch {
             val handle = com.music.bitchord.data.apple.AppleSources.handle()
             if (handle == null) {
                 setApplePage(
-                    browseId,
-                    UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle)),
+                    browseId = browseId,
+                    songs = UiState.Error(text(R.string.provider_apple_manifest_missing_subtitle)),
+                    requestId = requestId,
                 )
                 return@launch
             }
             if (collection == "songs") {
-                com.music.bitchord.data.apple.AppleSources.librarySongs(handle)
-                    .onSuccess { songs ->
-                        setApplePage(
-                            browseId,
-                            if (songs.isEmpty()) {
-                                UiState.Error(text(R.string.spotify_empty_tracks))
-                            } else {
-                                UiState.Success(songs)
-                            },
-                        )
-                    }
-                    .onFailure { failure -> setApplePage(browseId, UiState.Error(failure.friendly())) }
-                return@launch
+                readAppleSongCategory(handle, browseId, requestId)
+            } else {
+                readAppleShelfCategory(handle, browseId, requestId, collection)
             }
-            val rows: Result<List<com.music.bitchord.data.model.ShelfItem>> = when (collection) {
-                "playlists" -> com.music.bitchord.data.apple.AppleSources.libraryPlaylists(handle)
-                "albums" -> com.music.bitchord.data.apple.AppleSources.libraryAlbums(handle)
-                "artists" -> com.music.bitchord.data.apple.AppleSources.libraryArtists(handle)
-                else -> Result.success(emptyList())
+        }
+    }
+
+    /** Songs appear on page one and grow in place as later real pages arrive. */
+    private suspend fun readAppleSongCategory(
+        handle: com.music.bitchord.data.apple.AppleSources.Handle,
+        browseId: String,
+        requestId: Long,
+    ) {
+        var offset = 0
+        var first = true
+        while (true) {
+            val result = com.music.bitchord.data.apple.AppleSources.librarySongPage(handle, offset)
+            if (!ownsApplePage(browseId, requestId)) return
+            val page = result.getOrElse { failure ->
+                if (first) {
+                    setApplePage(
+                        browseId = browseId,
+                        songs = UiState.Error(failure.friendly()),
+                        requestId = requestId,
+                    )
+                }
+                return
             }
-            rows.onSuccess { items ->
-                setApplePage(
-                    browseId,
-                    if (items.isEmpty()) {
-                        UiState.Error(text(R.string.spotify_empty_tracks))
+            _detailStack.value = _detailStack.value.updateAppleRequest(browseId, requestId) { current ->
+                val previous = (current.songs as? UiState.Success)?.data.orEmpty()
+                val songs = if (first) page.items else previous + page.items
+                current.copy(
+                    songs = if (songs.isEmpty() && page.nextOffset == null) {
+                        UiState.Error(text(appleLibraryEmptyMessage("songs")))
+                    } else {
+                        UiState.Success(songs)
+                    },
+                )
+            }
+            val next = page.nextOffset ?: return
+            first = false
+            offset = next
+        }
+    }
+
+    /** Playlists, albums and artists use the same first-page/continuation contract. */
+    private suspend fun readAppleShelfCategory(
+        handle: com.music.bitchord.data.apple.AppleSources.Handle,
+        browseId: String,
+        requestId: Long,
+        collection: String,
+    ) {
+        var offset = 0
+        var first = true
+        while (true) {
+            val result = when (collection) {
+                "playlists" -> com.music.bitchord.data.apple.AppleSources.libraryPlaylistPage(handle, offset)
+                "albums" -> com.music.bitchord.data.apple.AppleSources.libraryAlbumPage(handle, offset)
+                else -> com.music.bitchord.data.apple.AppleSources.libraryArtistPage(handle, offset)
+            }
+            if (!ownsApplePage(browseId, requestId)) return
+            val page = result.getOrElse { failure ->
+                if (first) {
+                    setApplePage(
+                        browseId = browseId,
+                        songs = UiState.Error(failure.friendly()),
+                        requestId = requestId,
+                    )
+                }
+                return
+            }
+            _detailStack.value = _detailStack.value.updateAppleRequest(browseId, requestId) { current ->
+                val previous = current.sections.firstOrNull()?.items.orEmpty()
+                val items = if (first) page.items else previous + page.items
+                current.copy(
+                    songs = if (items.isEmpty() && page.nextOffset == null) {
+                        UiState.Error(text(appleLibraryEmptyMessage(collection)))
                     } else {
                         UiState.Success(emptyList())
                     },
                     sections = if (items.isEmpty()) {
                         emptyList()
                     } else {
-                        listOf(HomeShelf(title = title, subtitle = "", items = items))
+                        listOf(HomeShelf(title = current.title, subtitle = "", items = items))
                     },
                 )
-            }.onFailure { failure -> setApplePage(browseId, UiState.Error(failure.friendly())) }
+            }
+            val next = page.nextOffset ?: return
+            first = false
+            offset = next
         }
     }
+
+    private fun ownsApplePage(browseId: String, requestId: Long): Boolean =
+        _detailStack.value.any { it.browseId == browseId && it.requestId == requestId }
+
+    private fun appleLibraryEmptyMessage(collection: String): Int =
+        if (collection == "playlists") R.string.apple_library_empty_playlists else R.string.apple_library_empty
 
     /** A genre tile, opened as the editorial page Apple publishes for it. */
     fun openAppleGenre(curatorId: String, name: String, artworkUrl: String? = null) {
@@ -5395,9 +5542,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         songs: UiState<List<Song>>,
         sections: List<HomeShelf> = emptyList(),
         editorialHeroes: List<EditorialHero>? = null,
+        requestId: Long? = null,
     ) {
         _detailStack.value = _detailStack.value.map {
-            if (it.browseId != browseId) return@map it
+            if (it.browseId != browseId || requestId != null && it.requestId != requestId) {
+                return@map it
+            }
             // A page that already has its shelves keeps them. The genre page
             // fills in ten sections and a loader that knows nothing about
             // them lands afterwards; replacing them with nothing is how a
@@ -6731,12 +6881,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun Throwable.friendly(): String = when {
         message?.contains("resolve host", true) == true ||
             message?.contains("Unable to resolve", true) == true -> text(R.string.no_internet_connection)
-        message?.contains("401") == true || message?.contains("403") == true ->
-            text(R.string.youtube_request_rejected)
+        message?.contains("401") == true || message?.contains("403") == true -> text(
+            if (this is com.music.bitchord.data.apple.AppleException) {
+                R.string.apple_request_rejected
+            } else {
+                R.string.youtube_request_rejected
+            },
+        )
         else -> message ?: text(R.string.something_went_wrong)
     }
 
     private fun text(id: Int): String = getApplication<Application>().getString(id)
+}
+
+private val APPLE_LIBRARY_COLLECTIONS = setOf("playlists", "artists", "albums", "songs")
+
+/** Updates only the opening that owns an Apple response, never a same-id successor. */
+internal fun List<DetailPage>.updateAppleRequest(
+    browseId: String,
+    requestId: Long,
+    transform: (DetailPage) -> DetailPage,
+): List<DetailPage> = map { page ->
+    if (page.browseId == browseId && page.requestId == requestId) transform(page) else page
 }
 
 /** How many of a mood station's playlists are opened for its pool. */

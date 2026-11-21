@@ -342,8 +342,25 @@ fun DetailScreen(
      */
     onLoadMore: (() -> Unit)? = null,
 ) {
+    val appleLibraryCollection = page.browseId.removePrefix("apple:library:")
+        .takeIf { it != page.browseId }
+    if (appleLibraryCollection != null && appleLibraryCollection != "songs") {
+        AppleLibraryShelfCategory(
+            page = page,
+            collection = appleLibraryCollection,
+            listState = listState,
+            contentPadding = contentPadding,
+            onItemClick = onSectionItemClick,
+            onItemLongPress = onSectionItemLongPress,
+            modifier = modifier,
+        )
+        return
+    }
     val rawSongs = (page.songs as? UiState.Success)?.data.orEmpty()
-    val songs = remember(rawSongs, songSort) { rawSongs.sortedForDetail(songSort) }
+    val appleSongLibrary = page.browseId == "apple:library:songs"
+    val songs = remember(rawSongs, songSort, appleSongLibrary) {
+        rawSongs.sortedForDetail(songSort, appleSongLibrary)
+    }
     // What a numbered row shows regardless of [songSort] — an album's track
     // numbers are the sleeve's own and must not relabel themselves to match
     // wherever a sort put the row.
@@ -887,6 +904,184 @@ fun DetailScreen(
 }
 }
 
+private enum class AppleLibraryShelfSort { DEFAULT, TITLE, RECENTLY_ADDED, ARTIST }
+
+@Composable
+private fun AppleLibraryShelfSort.localizedLabel(): String = stringResource(
+    when (this) {
+        AppleLibraryShelfSort.DEFAULT -> R.string.sort_default
+        AppleLibraryShelfSort.TITLE -> R.string.sort_title_ascending
+        AppleLibraryShelfSort.RECENTLY_ADDED -> R.string.sort_date_added
+        AppleLibraryShelfSort.ARTIST -> R.string.artists
+    },
+)
+
+/** Local title/credit matching for a complete Apple library category. */
+internal fun List<ShelfItem>.matchingAppleLibrary(query: String): List<ShelfItem> {
+    if (query.isBlank()) return this
+    return filter { item ->
+        item.title.contains(query, ignoreCase = true) ||
+            item.subtitle.contains(query, ignoreCase = true)
+    }
+}
+
+/** Apple's collection grid, not a five-card artist carousel or release header. */
+@Composable
+private fun AppleLibraryShelfCategory(
+    page: DetailPage,
+    collection: String,
+    listState: LazyListState,
+    contentPadding: PaddingValues,
+    onItemClick: (ShelfItem) -> Unit,
+    onItemLongPress: ((ShelfItem) -> Unit)?,
+    modifier: Modifier,
+) {
+    val palette = rememberArtworkPalette(imageUrl = null)
+    var query by rememberSaveable(page.requestId) { mutableStateOf("") }
+    var sort by rememberSaveable(page.requestId) { mutableStateOf(AppleLibraryShelfSort.DEFAULT) }
+    var sortOpen by remember(page.requestId) { mutableStateOf(false) }
+    val sortOptions = when (collection) {
+        "playlists" -> listOf(
+            AppleLibraryShelfSort.DEFAULT,
+            AppleLibraryShelfSort.TITLE,
+            AppleLibraryShelfSort.RECENTLY_ADDED,
+        )
+        "albums" -> listOf(
+            AppleLibraryShelfSort.DEFAULT,
+            AppleLibraryShelfSort.TITLE,
+            AppleLibraryShelfSort.RECENTLY_ADDED,
+            AppleLibraryShelfSort.ARTIST,
+        )
+        else -> emptyList() // Apple's top-level Artists category has no sort control.
+    }
+    val rawItems = page.sections.firstOrNull()?.items.orEmpty()
+    val items = remember(rawItems, query, sort) {
+        val matching = rawItems.matchingAppleLibrary(query)
+        when (sort) {
+            AppleLibraryShelfSort.DEFAULT -> matching
+            AppleLibraryShelfSort.TITLE -> matching.sortedWith(
+                compareBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+            )
+            AppleLibraryShelfSort.RECENTLY_ADDED -> matching.sortedByDescending {
+                it.dateAdded.orEmpty()
+            }
+            AppleLibraryShelfSort.ARTIST -> matching.sortedWith(
+                compareBy<ShelfItem, String>(String.CASE_INSENSITIVE_ORDER) { it.subtitle }
+                    .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+            )
+        }
+    }
+    LazyColumn(
+        state = listState,
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
+    ) {
+        item(key = "apple-library-category:title") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        start = PAGE_GUTTER,
+                        end = 8.dp,
+                        top = topBarContentPadding() + 12.dp,
+                        bottom = 14.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = page.title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                if (sortOptions.isNotEmpty()) {
+                    Box {
+                        IconButton(onClick = { sortOpen = true }) {
+                            Icon(
+                                Icons.Rounded.Sort,
+                                contentDescription = stringResource(R.string.sort_library),
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortOpen,
+                            onDismissRequest = { sortOpen = false },
+                        ) {
+                            sortOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.localizedLabel()) },
+                                    trailingIcon = if (option == sort) {
+                                        { Icon(Icons.Rounded.Check, contentDescription = null) }
+                                    } else {
+                                        null
+                                    },
+                                    onClick = {
+                                        sort = option
+                                        sortOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "apple-library-category:search") {
+            DetailSearchField(
+                query = query,
+                onQueryChange = { query = it },
+                onClose = { query = "" },
+                autoFocus = false,
+                onFocused = {},
+                palette = palette,
+                type = BrowseType.OTHER,
+                hint = stringResource(R.string.apple_library_search_in, page.title),
+            )
+        }
+        when (val state = page.songs) {
+            is UiState.Loading -> detailSkeleton(false)
+            is UiState.Error -> item(key = "apple-library-category:error") {
+                MessageState(state.message)
+            }
+            is UiState.Success -> {
+                if (rawItems.isNotEmpty() && items.isEmpty()) {
+                    item(key = "apple-library-category:no-matches") {
+                        MessageState(stringResource(R.string.nothing_matches, query))
+                    }
+                }
+                itemsIndexed(
+                    items = items.chunked(2),
+                    key = { index, row ->
+                        "apple-library-category:row:$index:${row.first().browseId}:${row.first().title}"
+                    },
+                ) { _, row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = PAGE_GUTTER, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(LIBRARY_GRID_SPACING),
+                    ) {
+                        row.forEach { item ->
+                            SectionCard(
+                                item = item,
+                                palette = palette,
+                                onClick = { onItemClick(item) },
+                                onLongPress = onItemLongPress?.let { { it(item) } },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        repeat(2 - row.size) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /**
  * An album or playlist: the title, credit, meta and action buttons that sit
  * over the foot of the artwork.
@@ -1118,6 +1313,7 @@ private fun DetailSearchField(
     onFocused: () -> Unit,
     palette: ArtworkPalette,
     type: BrowseType,
+    hint: String? = null,
 ) {
     // Opened by a tap on a button, which is as clear a statement of intent as
     // the keyboard is going to get — so it comes up with the field rather than
@@ -1152,7 +1348,7 @@ private fun DetailSearchField(
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = stringResource(R.string.search_this_list),
+                    text = hint ?: stringResource(R.string.search_this_list),
                     style = MaterialTheme.typography.bodyLarge,
                     color = palette.onBackgroundVariant,
                     maxLines = 1,
@@ -1192,29 +1388,46 @@ private fun DetailSearchField(
     }
 }
 
-private fun List<Song>.sortedForDetail(sort: SongSort): List<Song> = when (sort) {
+internal fun List<Song>.sortedForDetail(
+    sort: SongSort,
+    appleSongLibrary: Boolean = false,
+): List<Song> = when (sort) {
     SongSort.DEFAULT -> this
     SongSort.TITLE_ASC -> sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.title })
     SongSort.TITLE_DESC -> sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.title })
+    SongSort.ARTIST_ASC -> sortedWith(
+        compareBy<Song, String>(String.CASE_INSENSITIVE_ORDER) { it.artist }
+            .thenBy(String.CASE_INSENSITIVE_ORDER) { it.title },
+    )
     // A catalogue row carries no added date, so its place in the running
     // order stands in for one: a playlist is appended to as songs are added,
     // and reversed that puts the most recent addition on top. Rows that do
     // carry a MediaStore timestamp — device tracks, downloads — are dated
     // properly, with the position order left to break the ties.
-    SongSort.DATE_ADDED_ASC -> withIndex()
-        .sortedWith(
-            compareBy<IndexedValue<Song>> { (_, song) ->
-                song.localDateAddedSeconds ?: Long.MAX_VALUE
-            }.thenBy { (position, _) -> position },
-        )
-        .map { it.value }
-    SongSort.DATE_ADDED_DESC -> withIndex()
-        .sortedWith(
-            compareByDescending<IndexedValue<Song>> { (_, song) ->
-                song.localDateAddedSeconds ?: Long.MIN_VALUE
-            }.thenByDescending { (position, _) -> position },
-        )
-        .map { it.value }
+    SongSort.DATE_ADDED_ASC -> if (appleSongLibrary) {
+        // Apple supplies the date. Unknown dates stay last in stable upstream
+        // order; response position is never treated as a timestamp.
+        sortedWith(compareBy { it.catalogueDateAddedMs ?: Long.MAX_VALUE })
+    } else {
+        withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<Song>> { (_, song) ->
+                    song.localDateAddedSeconds ?: Long.MAX_VALUE
+                }.thenBy { (position, _) -> position },
+            )
+            .map { it.value }
+    }
+    SongSort.DATE_ADDED_DESC -> if (appleSongLibrary) {
+        sortedWith(compareByDescending { it.catalogueDateAddedMs ?: Long.MIN_VALUE })
+    } else {
+        withIndex()
+            .sortedWith(
+                compareByDescending<IndexedValue<Song>> { (_, song) ->
+                    song.localDateAddedSeconds ?: Long.MIN_VALUE
+                }.thenByDescending { (position, _) -> position },
+            )
+            .map { it.value }
+    }
 }
 
 /**

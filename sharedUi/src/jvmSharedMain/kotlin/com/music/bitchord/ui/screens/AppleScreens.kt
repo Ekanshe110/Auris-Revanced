@@ -35,6 +35,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.music.bitchord.data.model.AppleEditorialElement
+import com.music.bitchord.data.model.AppleEditorialLink
 import com.music.bitchord.data.model.CARD_ART_PX
 import com.music.bitchord.data.model.HEADER_ART_PX
 import com.music.bitchord.data.model.HomeShelf
@@ -54,20 +56,13 @@ import com.music.bitchord.sharedui.resources.*
 import androidx.compose.foundation.shape.CircleShape
 
 /**
- * The New page, in Apple's own shape.
+ * Apple's Home page: every Listen Now group in Apple's own order.
  *
- * Apple Music's New tab is not a list of shelves with a heading over each: it
- * is one large card at the head of the page, a grid of two-column cards under
- * it, and then a plain list of what is left. The order is the shape, so it
- * is drawn in that order rather than being approximated with the ordinary
- * shelf rows.
- *
- * The rows themselves are Apple's rows — they come from the Apple catalogue
- * through the installed manifest, whatever else the app is playing — so this
- * page is the *look* axis: Apple's layout over whatever the recommendation
- * axis supplied.
+ * A group marked as a feature row keeps all of its large cards; ordinary
+ * groups remain horizontal shelves. No item is consumed as a decorative hero
+ * and then omitted from the page, and Apple Home deliberately has no pull
+ * gesture.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppleHomeScreen(
     state: UiState<List<HomeShelf>>,
@@ -77,77 +72,57 @@ fun AppleHomeScreen(
     onItemClick: (ShelfItem, String) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)? = null,
     onRetry: () -> Unit,
-    refreshing: Boolean,
-    onRefresh: () -> Unit,
-    pullState: PullToRefreshState,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues,
     title: String? = null,
 ) {
-    PullToRefresh(
-        refreshing = refreshing,
-        onRefresh = onRefresh,
-        state = pullState,
-        modifier = modifier,
+    // Apple's Home has no pull-to-refresh. A reload keeps the last valid page
+    // in the ViewModel until Apple supplies a complete replacement.
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
     ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = contentPadding,
-        ) {
-            if (title != null) {
-                item(key = "apple:title") {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.padding(
-                            start = PAGE_GUTTER,
-                            end = PAGE_GUTTER,
-                            top = 12.dp,
-                            bottom = 14.dp,
-                        ),
-                    )
-                }
+        if (title != null) {
+            item(key = "apple:title") {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.padding(
+                        start = PAGE_GUTTER,
+                        end = PAGE_GUTTER,
+                        top = 12.dp,
+                        bottom = 14.dp,
+                    ),
+                )
             }
-            when (val page = state) {
-                is UiState.Loading -> feedSkeleton(firstIsHero = false)
-                is UiState.Error -> item(key = "apple:error") {
-                    MessageState(
-                        message = page.message,
-                        actionLabel = stringResource(Res.string.retry),
-                        onAction = onRetry,
-                    )
-                }
-                is UiState.Success -> {
-                    val shelves = page.data
-                    // The head of the page: a run of large portrait cards,
-                    // the way Apple's own page opens. One card per group, and
-                    // the first card is the one the page leads with.
-                    val heads = shelves.take(6)
-                    if (heads.isNotEmpty()) {
-                        item(key = "apple:hero") {
-                            AppleHeroCarousel(
-                                shelves = heads,
-                                onItemClick = onItemClick,
-                                onItemLongPress = onItemLongPress,
-                            )
-                        }
-                    }
-                    // Every other group of Apple's, each as its own row: a
-                    // heading over a horizontal run of square cards. That is
-                    // the shape Apple's own page draws — one row per group,
-                    // scrolled sideways, not a grid of everything at once.
-                    itemsIndexed(
-                        // Everything after the head cards: the groups the
-                        // head did not already show.
-                        shelves.filter { shelf -> heads.none { it === shelf } },
-                        // The row's place is part of the key: two groups can
-                        // carry the same title, and a lazy list given the
-                        // same key twice crashes rather than drawing it.
-                        key = { index, shelf -> "apple:shelf:$index:${shelf.title}" },
-                    ) { _, shelf ->
-                        AppleShelfCarousel(
+        }
+        when (val page = state) {
+            is UiState.Loading -> feedSkeleton(firstIsHero = false)
+            is UiState.Error -> item(key = "apple:error") {
+                MessageState(
+                    message = page.message,
+                    actionLabel = stringResource(Res.string.retry),
+                    onAction = onRetry,
+                )
+            }
+            is UiState.Success -> {
+                itemsIndexed(
+                    page.data,
+                    key = { index, shelf -> "apple:shelf:$index:${shelf.title}" },
+                ) { _, shelf ->
+                    when (shelf.layout) {
+                        "hero" -> AppleHeroCarousel(
+                            shelf = shelf,
+                            onItemClick = onItemClick,
+                            onItemLongPress = onItemLongPress,
+                        )
+                        "concert" -> AppleConcertShelf(
+                            shelf = shelf,
+                            onItemClick = onItemClick,
+                        )
+                        else -> AppleShelfCarousel(
                             shelf = shelf,
                             onItemClick = onItemClick,
                             onItemLongPress = onItemLongPress,
@@ -162,15 +137,12 @@ fun AppleHomeScreen(
 /**
  * The New page, in Apple's own shape.
  *
- * Apple's New tab is the browse page: every group Apple offers, drawn as a
- * two-column grid of cards the way Apple's own browse page draws them. The
- * Home page leads with one large card and a few of these; this page is the
- * whole of Apple's browse, which is what the tab is for.
+ * Apple's New tab keeps the ordered editorial elements and their own layout
+ * hints: feature cards, track pages, compact or expanded shelves, videos and
+ * real directory links. No group is reconstructed from a catalogue search.
  *
- * The content is Apple's own groups, read from Apple's catalogue through the
- * installed manifest — so this page is Apple's whatever else the app is
- * playing, and it is a page of the catalogue rather than a page of the
- * listener's history.
+ * The content comes from Apple's catalogue through the installed manifest,
+ * independently of the recommendation source used by Home.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -179,9 +151,9 @@ fun AppleBrowseScreen(
     listState: LazyListState,
     onItemClick: (ShelfItem, String) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)? = null,
-    /** The directory of what else there is to browse, and the way into it. */
-    directory: List<Pair<String, String>> = emptyList(),
-    onBrowse: (String) -> Unit = { },
+    /** Apple's ordered elements; legacy flat shelves are mapped into these. */
+    elements: List<AppleEditorialElement>,
+    onLinkClick: (AppleEditorialLink) -> Unit = { },
     /**
      * Tapping a group's heading. The chevron after the title says the row is
      * a way into the whole group, so the heading has to answer a tap.
@@ -231,41 +203,17 @@ fun AppleBrowseScreen(
                     )
                 }
                 is UiState.Success -> {
-                    // Apple's browse page is a run of groups, each a heading
-                    // over a horizontal row of square cards.
                     itemsIndexed(
-                        page.data,
-                        key = { index, shelf -> "apple-browse:shelf:$index:${shelf.title}" },
-                    ) { _, shelf ->
-                        AppleShelfCarousel(
-                            shelf = shelf,
+                        elements,
+                        key = { index, element -> "apple-browse:element:$index:${element.id}" },
+                    ) { _, element ->
+                        AppleNewEditorialElement(
+                            element = element,
                             onItemClick = onItemClick,
                             onItemLongPress = onItemLongPress,
-                            onShelfHeaderClick = onShelfHeaderClick,
+                            onShelfHeaderClick = { shelf -> onShelfHeaderClick?.invoke(shelf) },
+                            onLinkClick = onLinkClick,
                         )
-                    }
-                    // The directory of what else there is to browse, the way
-                    // Apple's own browse page ends.
-                    if (directory.isNotEmpty()) {
-                        item(key = "apple-browse:directory-header") {
-                            Text(
-                                text = stringResource(Res.string.more_to_explore),
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onBackground,
-                                modifier = Modifier.padding(
-                                    start = PAGE_GUTTER,
-                                    end = PAGE_GUTTER,
-                                    top = 20.dp,
-                                    bottom = 8.dp,
-                                ),
-                            )
-                        }
-                        itemsIndexed(
-                            directory,
-                            key = { index, row -> "apple-browse:directory:$index:${row.first}" },
-                        ) { _, row ->
-                            AppleDirectoryRow(label = row.first, onClick = { onBrowse(row.first) })
-                        }
                     }
                 }
             }
@@ -413,28 +361,6 @@ private fun AppleShelfCarousel(
 }
 
 /**
- * One row of the directory.
- *
- * A plain line of words, the way Apple's own browse page ends: the way into
- * the rest of the catalogue.
- */
-@Composable
-private fun AppleDirectoryRow(
-    label: String,
-    onClick: () -> Unit,
-) {
-    Text(
-        text = label,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = PAGE_GUTTER, vertical = 13.dp),
-    )
-}
-
-/**
  * The run of large cards at the head of the page.
  *
  * Apple's own page opens with portrait cards: the cover, the title over it
@@ -443,67 +369,136 @@ private fun AppleDirectoryRow(
  */
 @Composable
 private fun AppleHeroCarousel(
-    shelves: List<HomeShelf>,
+    shelf: HomeShelf,
     onItemClick: (ShelfItem, String) -> Unit,
     onItemLongPress: ((ShelfItem) -> Unit)?,
 ) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        itemsIndexed(
-            shelves,
-            key = { index, shelf -> "apple:hero:$index:${shelf.title}" },
-        ) { _, shelf ->
-            val item = shelf.items.firstOrNull() ?: return@itemsIndexed
-            Column(
-                modifier = Modifier.width(240.dp),
-            ) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = shelf.title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                top = 8.dp,
+                bottom = 10.dp,
+            ),
+        )
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = PAGE_GUTTER),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            itemsIndexed(
+                shelf.items,
+                key = { index, item -> "apple:hero:$index:${item.videoId ?: item.browseId ?: item.title}" },
+            ) { _, item ->
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .width(240.dp)
                         .aspectRatio(3f / 4f)
                         .clip(RoundedCornerShape(14.dp))
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                         .longPressMenuClickable(
                             onClick = { onItemClick(item, shelf.title) },
                             onLongClick = onItemLongPress?.let { { it(item) } },
+                            enabled = item.videoId != null || item.browseId != null || item.externalUrl != null,
                         ),
                 ) {
                     AsyncImage(
-                        model = item.thumbnailUrl?.artworkAt(HEADER_ART_PX),
+                        model = (item.heroArtworkUrl ?: item.thumbnailUrl)?.artworkAt(HEADER_ART_PX),
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        color = Color.White,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                    Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
                             .padding(14.dp),
-                    )
+                    ) {
+                        if (item.badge.isNotBlank()) {
+                            Text(
+                                text = item.badge,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            color = Color.White,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (item.description.isNotBlank()) {
+                            Text(
+                                text = item.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (item.subtitle.isNotBlank()) {
+            }
+        }
+    }
+}
+
+/** Apple's full-width editorial destination row, used by Concerts. */
+@Composable
+private fun AppleConcertShelf(
+    shelf: HomeShelf,
+    onItemClick: (ShelfItem, String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = shelf.title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(
+                start = PAGE_GUTTER,
+                end = PAGE_GUTTER,
+                top = 18.dp,
+                bottom = 8.dp,
+            ),
+        )
+        shelf.items.forEach { item ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = PAGE_GUTTER)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clickable(enabled = item.externalUrl != null) { onItemClick(item, shelf.title) }
+                    .padding(16.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        text = item.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onBackground,
                     )
+                    if (item.description.isNotBlank() || item.subtitle.isNotBlank()) {
+                        Text(
+                            text = item.description.ifBlank { item.subtitle },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (item.badge.isNotBlank()) {
+                        Text(
+                            text = item.badge,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
                 }
             }
         }

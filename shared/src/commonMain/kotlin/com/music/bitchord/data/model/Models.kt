@@ -183,6 +183,8 @@ data class Song(    val videoId: String,
      * itself. A cross-source fallback compares it before any title.
      */
     val isrc: String? = null,
+    /** Apple's own library-added timestamp in epoch milliseconds, when supplied. */
+    val catalogueDateAddedMs: Long? = null,
 ) {
     /** Legacy derived property: true if and only if [queueTier] is [QueueTier.AUTOPLAY]. */
     val fromAutoplay: Boolean get() = queueTier == QueueTier.AUTOPLAY
@@ -455,6 +457,44 @@ data class ShelfItem(
     val popularity: Int? = null,
     /** Apple's own destination for media this app cannot play directly. */
     val externalUrl: String? = null,
+    /** Portrait editorial artwork and the copy Apple prints over a feature card. */
+    val heroArtworkUrl: String? = null,
+    val badge: String = "",
+    val description: String = "",
+    /** A station plays directly; other catalogue cards open [browseId]. */
+    val stationId: String? = null,
+    val isLive: Boolean = false,
+    /** Upstream resource type, used for video and editorial presentation. */
+    val editorialType: String = "",
+    /** Apple's own feature-card copy and footer, without synthesising either. */
+    val heroKind: String = "",
+    val designTag: String = "",
+    val footerTitle: String = "",
+    val footerArtworkUrl: String? = null,
+    /** Apple's own library-added timestamp, when this is a library row. */
+    val dateAdded: String? = null,
+)
+
+/** A real destination from Apple's More to Explore editorial element. */
+data class AppleEditorialLink(
+    val label: String,
+    val url: String,
+    val target: String = "",
+)
+
+/**
+ * One ordered child of Apple's New or Radio grouping.
+ *
+ * [kind] and [displayStyle] are upstream's own controller hints. Empty items
+ * are meaningful: Apple retains an empty Local Broadcasters heading too.
+ */
+data class AppleEditorialElement(
+    val id: String,
+    val kind: String,
+    val displayStyle: String,
+    val title: String,
+    val items: List<ShelfItem> = emptyList(),
+    val links: List<AppleEditorialLink> = emptyList(),
 )
 
 /**
@@ -486,22 +526,12 @@ data class AppleRadioShelf(
 )
 
 /**
- * Apple's library, as the page draws it.
- *
- * Apple's Library page is not one list: it leads with what was added
- * recently, then the albums, then the songs, and only then the playlists.
- * Each of those is the listener's own, so none of them is another
- * catalogue's.
+ * Apple's Library landing page: category navigation followed by one mixed,
+ * chronologically ordered Recently Added grid of the listener's albums and
+ * playlists. The four categories open complete pages of their own.
  */
 data class AppleLibraryContent(
-    /** The newest playlists, as the tiles at the head of the page. */
     val recentlyAdded: List<ShelfItem> = emptyList(),
-    /** The listener's albums. */
-    val albums: List<ShelfItem> = emptyList(),
-    /** The listener's songs, as the rows that play. */
-    val songs: List<Song> = emptyList(),
-    /** The listener's playlists. */
-    val playlists: List<ShelfItem> = emptyList(),
 )
 
 /** The signed-in Google account, as YouTube Music reports it. */
@@ -548,6 +578,8 @@ data class HomeShelf(
     val subtitle: String = "",
     val moreBrowseId: String? = null,
     val moreParams: String? = null,
+    /** Apple's own presentation hint; empty for an ordinary horizontal shelf. */
+    val layout: String = "",
 )
 
 /**
@@ -712,6 +744,8 @@ data class DetailPage(
     val continuation: String? = null,
     /** A next page is on the wire for this page. */
     val loadingMore: Boolean = false,
+    /** Identifies one opening, so an older Apple response cannot fill a newer page. */
+    val requestId: Long = 0,
 )
 
 /**

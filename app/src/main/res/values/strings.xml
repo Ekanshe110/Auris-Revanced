@@ -187,7 +187,10 @@
     </plurals>
     <string name="provider_apple_only_catalogue_subtitle">Play and offer only what is in Apple Music\'s catalogue</string>
     <string name="apple_new_tab">New</string>
-    <string name="apple_library_empty">Your Apple Music library has no playlists in it</string>
+    <string name="apple_library_empty">No Music</string>
+    <string name="apple_library_empty_playlists">No playlists in your Apple Music library</string>
+    <string name="apple_library_search_in">Find in %1$s</string>
+    <string name="apple_request_rejected">Apple Music rejected the request. Check the Apple Music addon session and try again.</string>
     <string name="music_catalogue">Music catalogue</string>
     <string name="music_catalogue_row">Spotify or YouTube Music</string>
     <string name="music_catalogue_row_subtitle">Where Home and Search come from</string>

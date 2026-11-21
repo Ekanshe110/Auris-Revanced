@@ -30,8 +30,35 @@ class HomeFeedCacheTest {
                 items = listOf(
                     ShelfItem("Song", "Artist", "https://img/w120-h120", videoId = "v1", browseId = null),
                     ShelfItem("Album", "Artist · 2024", null, videoId = null, browseId = "MPRE1", year = 2024),
+                    ShelfItem(
+                        title = "Concert",
+                        subtitle = "Upcoming shows",
+                        thumbnailUrl = null,
+                        videoId = null,
+                        browseId = null,
+                        externalUrl = "https://music.apple.com/concerts",
+                        heroArtworkUrl = "https://img/hero",
+                        badge = "Set Location",
+                        description = "Find Concerts Nearby",
+                    ),
+                    ShelfItem(
+                        title = "Apple Music 1",
+                        subtitle = "Apple Music",
+                        thumbnailUrl = null,
+                        videoId = null,
+                        browseId = "apple:station:ra.978194965",
+                        stationId = "ra.978194965",
+                        isLive = true,
+                        editorialType = "stations",
+                        heroKind = "317",
+                        designTag = "APPLE MUSIC 1",
+                        footerTitle = "Today's Hits",
+                        footerArtworkUrl = "https://img/footer",
+                        dateAdded = "2026-11-20T12:00:00Z",
+                    ),
                 ),
                 moreBrowseId = "FEmusic_more",
+                layout = "hero",
             ),
             HomeShelf(
                 title = "Popular",
@@ -68,6 +95,23 @@ class HomeFeedCacheTest {
         val text = HomeFeedCache.encode(snapshot, null, now)
         assertEquals(snapshot, HomeFeedCache.decode(text, null, now + HomeFeedCache.MAX_AGE_MS - 1))
         assertNull(HomeFeedCache.decode(text, null, now + HomeFeedCache.MAX_AGE_MS))
+    }
+
+    @Test
+    fun aCompleteApplePageIsNotTruncated() {
+        val page = HomeFeedCache.Snapshot(
+            shelves = List(20) { index ->
+                HomeShelf(
+                    title = "Shelf $index",
+                    items = listOf(ShelfItem("Item $index", "", null, null, "pl.$index")),
+                )
+            },
+        )
+
+        val restored = HomeFeedCache.decode(HomeFeedCache.encode(page, null, now), null, now)
+
+        assertEquals(20, restored?.shelves?.size)
+        assertEquals(page, restored)
     }
 
     @Test

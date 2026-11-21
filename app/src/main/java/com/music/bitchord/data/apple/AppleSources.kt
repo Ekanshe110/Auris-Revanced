@@ -1,5 +1,6 @@
 package com.music.bitchord.data.apple
 
+import com.music.bitchord.data.model.AppleEditorialElement
 import com.music.bitchord.data.model.BrowseItem
 import com.music.bitchord.data.model.BrowseType
 import com.music.bitchord.data.model.EditorialHero
@@ -11,10 +12,26 @@ import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.sources.SourceRegistry
 import com.music.bitchord.data.sources.addon.AddonManifest
+import java.time.Instant
 
 internal data class AppleEditorialDetails(
     val heroes: List<EditorialHero>,
     val shelves: List<HomeShelf>,
+)
+
+internal data class AppleBrowseContent(
+    val shelves: List<HomeShelf>,
+    val elements: List<AppleEditorialElement>,
+)
+
+internal data class AppleShelfPage(
+    val items: List<ShelfItem>,
+    val nextOffset: Int?,
+)
+
+internal data class AppleSongPage(
+    val items: List<Song>,
+    val nextOffset: Int?,
 )
 
 /**
@@ -102,7 +119,12 @@ internal object AppleSources {
             home.shelves.mapNotNull { shelf ->
                 val items = shelf.items.mapNotNull { item -> item.shelfItem(handle.configId) }
                 if (items.isEmpty()) null
-                else HomeShelf(title = shelf.title, subtitle = shelf.subtitle, items = items)
+                else HomeShelf(
+                    title = shelf.title,
+                    subtitle = shelf.subtitle,
+                    items = items,
+                    layout = shelf.layout,
+                )
             }
         }
 
@@ -207,6 +229,15 @@ internal object AppleSources {
             }
         }
 
+    /** Apple's ordered Radio grouping, including videos, links and empty rows. */
+    suspend fun radioElements(
+        handle: Handle,
+        refresh: Boolean = false,
+    ): Result<List<AppleEditorialElement>> =
+        AppleCatalogue.editorialPage(handle.baseUrl, "radio", refresh).map { page ->
+            page.orderedElements(handle)
+        }
+
     /**
      * The stations other broadcasters run, as the rows the Radio page draws.
      *
@@ -230,49 +261,17 @@ internal object AppleSources {
      * The rows come from Apple's own catalogue, so a row here is a row of
      * Apple's, opened the way Apple's own page opens it.
      */
-    suspend fun browseShelves(handle: Handle): Result<List<HomeShelf>> {
-        val shelves = mutableListOf<HomeShelf>()
-        // Apple's own New page: every shelf it publishes, in its order, with
-        // the lockups it actually draws. A song carries the catalogue's own
-        // key, so it plays; albums and playlists open their pages. Only the
-        // rows that are neither — videos, interviews — are left out.
-        val editorial = AppleCatalogue.editorialPage(handle.baseUrl, "new")
-            .getOrNull()?.shelves.orEmpty()
-        var usedEditorial = false
-        for (shelf in editorial) {
-            val mapped = shelf.toHomeShelf(handle) ?: continue
-            usedEditorial = true
-            shelves += mapped
-        }
-        if (usedEditorial) return Result.success(shelves)
-        // The catalogue's own rows, as the addon defines them. Nothing here
-        // is a list in the app: a row Apple adds is a server edit.
-        val browseSections = AppleCatalogue.browsePage(handle.baseUrl)
-            .getOrNull()?.sections.orEmpty()
-        for (section in browseSections) {
-            val rows = AppleCatalogue.browse(
-                handle.baseUrl,
-                section.term,
-                section.types.ifBlank { "playlists" },
-                25,
-            ).getOrNull()?.playlists.orEmpty()
-            if (rows.isEmpty()) continue
-            shelves += HomeShelf(
-                title = section.title,
-                subtitle = "",
-                items = rows.mapNotNull { row ->
-                    ShelfItem(
-                        title = row.title,
-                        subtitle = row.artist,
-                        thumbnailUrl = row.artworkURL,
-                        videoId = null,
-                        browseId = PAGE_PREFIX + row.id,
-                    )
-                },
+    /** New's complete ordered page, plus the flat shelves older screens use. */
+    suspend fun browseContent(
+        handle: Handle,
+        refresh: Boolean = false,
+    ): Result<AppleBrowseContent> =
+        AppleCatalogue.editorialPage(handle.baseUrl, "new", refresh).map { editorial ->
+            AppleBrowseContent(
+                shelves = editorial.shelves.mapNotNull { it.toHomeShelf(handle) },
+                elements = editorial.orderedElements(handle),
             )
         }
-        return Result.success(shelves)
-    }
 
     /**
      * A genre's own page — every section Apple draws on it.
@@ -294,13 +293,30 @@ internal object AppleSources {
             shelves = shelves.mapNotNull { it.toHomeShelf(handle) },
         )
 
+    private fun AppleEditorialPage.orderedElements(handle: Handle): List<AppleEditorialElement> {
+        if (elements.isNotEmpty()) return elements.map { it.toEditorialElement(handle) }
+        // Older addons expose separate heroes and flat shelves. Preserve that
+        // contract without discarding feature cards or inventing directories.
+        return buildList {
+            val featureItems = heroes.mapNotNull { it.toShelfItem(handle) }
+            if (featureItems.isNotEmpty()) {
+                add(
+                    AppleEditorialElement(
+                        id = "legacy-heroes",
+                        kind = "316",
+                        displayStyle = "compact",
+                        title = "",
+                        items = featureItems,
+                    ),
+                )
+            }
+            shelves.forEachIndexed { index, shelf -> add(shelf.toEditorialElement(handle, index)) }
+        }
+    }
+
     /** Apple's search-page genres; empty on an addon without the route. */
     suspend fun genres(handle: Handle): Result<List<AppleGenre>> =
         AppleCatalogue.genres(handle.baseUrl)
-
-    /** The directory at the foot of the New page, as the addon defines it. */
-    suspend fun browseDirectory(handle: Handle): Result<List<AppleDirectoryEntry>> =
-        AppleCatalogue.browsePage(handle.baseUrl).map { it.directory }
 
     /**
      * An artist's albums as the shelves its page draws, titled by the caller
@@ -320,89 +336,113 @@ internal object AppleSources {
             }
         }
 
-    /**
-     * The listener's own playlists, as the rows the Library page draws.
-     *
-     * A playlist is opened as a page of its own tracks, and it is opened by
-     * the library id: it is the listener's own copy, and the catalogue's id
-     * for the same recording is not the same thing.
-     */
-    suspend fun libraryPlaylists(handle: Handle, limit: Int = 100): Result<List<ShelfItem>> =
-        AppleCatalogue.libraryAll(handle.baseUrl, "playlists", limit).map { items ->
-            items.mapNotNull { item ->
-                if (item.title.isBlank()) return@mapNotNull null
-                ShelfItem(
-                    title = item.title,
-                    subtitle = item.artist,
-                    thumbnailUrl = item.artworkURL,
-                    videoId = null,
-                    browseId = PAGE_PREFIX + item.id,
-                )
-            }
-        }
+    /** One page of the listener's playlists. Library ids open library tracks. */
+    suspend fun libraryPlaylistPage(
+        handle: Handle,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): Result<AppleShelfPage> = libraryShelfPage(handle, "playlists", offset, limit) {
+        it.libraryPlaylistRow()
+    }
 
-    /** The listener's own albums, as the tiles the Library page shows. */
-    suspend fun libraryAlbums(handle: Handle, limit: Int = 100): Result<List<ShelfItem>> =
-        AppleCatalogue.libraryAll(handle.baseUrl, "albums", limit).map { items ->
-            items.mapNotNull { item ->
-                if (item.title.isBlank()) return@mapNotNull null
-                ShelfItem(
-                    title = item.title,
-                    subtitle = item.artist,
-                    thumbnailUrl = item.artworkURL,
-                    videoId = null,
-                    browseId = LIB_ALBUM_PREFIX + item.id,
-                )
-            }
-        }
+    /** One page of the listener's albums. */
+    suspend fun libraryAlbumPage(
+        handle: Handle,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): Result<AppleShelfPage> = libraryShelfPage(handle, "albums", offset, limit) {
+        it.libraryAlbumRow()
+    }
 
-    /** The listener's own artists, as tiles that open their pages. */
-    suspend fun libraryArtists(handle: Handle, limit: Int = 100): Result<List<ShelfItem>> =
-        AppleCatalogue.libraryAll(handle.baseUrl, "artists", limit).map { items ->
-            items.mapNotNull { item ->
-                if (item.title.isBlank()) return@mapNotNull null
-                // A library artist is identified by its library id; only the
-                // catalogue id opens a page of Apple's, and the addon fills
-                // that in where it could resolve one. A credit line naming
-                // several people ("A, B & C") has no single artist page, so
-                // it is left out rather than pointed at the wrong one.
-                val catalogId = item.catalogId?.takeIf { it.isNotBlank() }
-                    ?: return@mapNotNull null
-                ShelfItem(
-                    title = item.title,
-                    subtitle = "",
-                    thumbnailUrl = item.artworkURL,
-                    videoId = null,
-                    browseId = ARTIST_PREFIX + catalogId,
-                )
-            }
-        }
+    /** One page of artists, including artists whose catalogue id is unresolved. */
+    suspend fun libraryArtistPage(
+        handle: Handle,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): Result<AppleShelfPage> = libraryShelfPage(handle, "artists", offset, limit) {
+        it.libraryArtistRow()
+    }
 
-    /** The listener's own songs, as the rows that play. */
-    suspend fun librarySongs(handle: Handle, limit: Int = 100): Result<List<Song>> =
-        AppleCatalogue.libraryAll(handle.baseUrl, "songs", limit).map { items ->
-            items.mapNotNull { item ->
+    /** One page of songs, published immediately rather than after a full walk. */
+    suspend fun librarySongPage(
+        handle: Handle,
+        offset: Int = 0,
+        limit: Int = 100,
+    ): Result<AppleSongPage> = AppleCatalogue.library(handle.baseUrl, "songs", offset, limit).map { page ->
+        AppleSongPage(
+            items = page.tracks.mapNotNull { item ->
                 val id = item.catalogId?.takeIf { it.isNotBlank() } ?: item.id
-                if (id.isBlank() || item.title.isBlank()) return@mapNotNull null
-                Song(
-                    videoId = SourceRegistry.trackKey(handle.configId, id),
-                    title = item.title,
-                    artist = item.artist,
-                    thumbnailUrl = item.artworkURL,
-                    durationText = item.runtimeMs.takeIf { it > 0 }?.let(::durationText),
-                    albumName = item.album.takeIf { it.isNotBlank() },
-                    isrc = item.isrc?.trim()?.takeIf { it.isNotEmpty() },
-                    sourceQuality = item.audioQuality,
-                )
-            }
+                if (id.isBlank() || item.title.isBlank()) null else item.song(handle.configId)
+            },
+            nextOffset = page.followingOffset(offset),
+        )
+    }
+
+    private suspend fun libraryShelfPage(
+        handle: Handle,
+        collection: String,
+        offset: Int,
+        limit: Int,
+        mapper: (AppleItem) -> ShelfItem?,
+    ): Result<AppleShelfPage> =
+        AppleCatalogue.library(handle.baseUrl, collection, offset, limit).map { page ->
+            AppleShelfPage(
+                items = page.tracks.mapNotNull(mapper),
+                nextOffset = page.followingOffset(offset),
+            )
         }
 
     // ── Rows ──────────────────────────────────────────────────────────────
 }
 
+/** The next real page, or null at a terminal, empty, or non-advancing answer. */
+internal fun AppleLibraryPage.followingOffset(requestedOffset: Int): Int? {
+    if (!hasMore || tracks.isEmpty()) return null
+    val next = nextOffset ?: (requestedOffset + tracks.size)
+    return next.takeIf { it > requestedOffset }
+}
+
+internal fun AppleItem.libraryPlaylistRow(): ShelfItem? =
+    libraryRow(AppleSources.PAGE_PREFIX + id)
+
+internal fun AppleItem.libraryAlbumRow(): ShelfItem? =
+    libraryRow(AppleSources.LIB_ALBUM_PREFIX + id)
+
+/**
+ * A library artist is not a catalogue artist. Without a resolved catalogue id
+ * the row remains visible but has no destination, rather than a fake route
+ * that would send its library id to the catalogue.
+ */
+internal fun AppleItem.libraryArtistRow(): ShelfItem? = libraryRow(
+    catalogId?.takeIf { it.isNotBlank() }?.let { AppleSources.ARTIST_PREFIX + it },
+    includeCredit = false,
+)
+
+private fun AppleItem.libraryRow(
+    destination: String?,
+    includeCredit: Boolean = true,
+): ShelfItem? {
+    if (title.isBlank()) return null
+    return ShelfItem(
+        title = title,
+        subtitle = if (includeCredit) artist else "",
+        thumbnailUrl = artworkURL,
+        videoId = null,
+        browseId = destination,
+        dateAdded = dateAdded,
+    )
+}
+
+/** Apple's mixed Recently Added order; undated rows keep their upstream order last. */
+internal fun appleRecentlyAdded(
+    playlists: List<ShelfItem>,
+    albums: List<ShelfItem>,
+): List<ShelfItem> = (playlists + albums).sortedByDescending { it.dateAdded.orEmpty() }
+
 /** The song as this app's player knows it. */
 internal fun AppleItem.song(configId: String): Song = Song(
-    videoId = SourceRegistry.trackKey(configId, id),
+    // A library id identifies the library row, not the recording's audio.
+    videoId = SourceRegistry.trackKey(configId, catalogId?.takeIf { it.isNotBlank() } ?: id),
     title = title,
     artist = artist,
     thumbnailUrl = artworkURL,
@@ -410,12 +450,18 @@ internal fun AppleItem.song(configId: String): Song = Song(
     albumName = album.takeIf { it.isNotBlank() },
     // The recording's identity across catalogues, for a cross-source match.
     isrc = isrc?.trim()?.takeIf { it.isNotEmpty() },
+    sourceQuality = audioQuality,
     // What the player needs to know to offer the rendition switch: whether
     // Apple holds an Atmos mix of this recording, and whether it holds a
     // Hi-Res master.
     atmosAvailable = hasAtmos,
     hiResAvailable = hasHiRes,
+    catalogueDateAddedMs = appleDateAddedMillis(dateAdded),
 )
+
+internal fun appleDateAddedMillis(value: String?): Long? = value?.let { timestamp ->
+    runCatching { Instant.parse(timestamp).toEpochMilli() }.getOrNull()
+}
 
 /** The card this app draws for the row. */
 internal fun AppleItem.shelfItem(
@@ -423,7 +469,7 @@ internal fun AppleItem.shelfItem(
     albumBrowsePrefix: String = AppleSources.ALBUM_PREFIX,
 ): ShelfItem? {
     if (title.isBlank()) return null
-    return when (type.lowercase()) {
+    val item = when (type.lowercase()) {
         "song" -> ShelfItem(
             title = title,
             subtitle = artist,
@@ -438,6 +484,14 @@ internal fun AppleItem.shelfItem(
             videoId = null,
             browseId = albumBrowsePrefix + id,
         )
+        "external" -> ShelfItem(
+            title = title,
+            subtitle = artist,
+            thumbnailUrl = artworkURL,
+            videoId = null,
+            browseId = null,
+            externalUrl = url?.takeIf { it.startsWith("https://music.apple.com/") },
+        )
         else -> ShelfItem(
             title = title,
             subtitle = artist.ifBlank { album },
@@ -446,6 +500,14 @@ internal fun AppleItem.shelfItem(
             browseId = browseIdOf(),
         )
     }
+    return item.copy(
+        heroArtworkUrl = heroArtworkURL,
+        badge = badge,
+        description = description,
+        stationId = id.takeIf { type.equals("station", true) || type.equals("stations", true) },
+        isLive = isLive,
+        editorialType = type,
+    )
 }
 
 /** The page this row opens, when it is a page and not a track. */
@@ -465,7 +527,7 @@ internal fun AppleItem.browseIdOf(): String? = when (type.lowercase()) {
  */
 internal fun AppleEditorialItem.toShelfItem(handle: AppleSources.Handle): ShelfItem? {
     if (name.isBlank()) return null
-    return when (type.lowercase()) {
+    val item = when (type.lowercase()) {
         "song", "songs" -> ShelfItem(
             title = name,
             subtitle = artistName,
@@ -489,10 +551,11 @@ internal fun AppleEditorialItem.toShelfItem(handle: AppleSources.Handle): ShelfI
         )
         "station", "stations" -> ShelfItem(
             title = name,
-            subtitle = artistName,
+            subtitle = artistName.ifBlank { provider.orEmpty() },
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = AppleSources.STATION_PREFIX + id,
+            stationId = id,
         )
         "artist", "artists" -> ShelfItem(
             title = name,
@@ -523,12 +586,31 @@ internal fun AppleEditorialItem.toShelfItem(handle: AppleSources.Handle): ShelfI
             thumbnailUrl = artworkURL,
             videoId = null,
             browseId = null,
-            // Apple does not expose an audio stream contract for these ids.
-            // Open the real video/movie page instead of pretending it is a song.
-            externalUrl = url?.takeIf { it.startsWith("https://music.apple.com/") },
+            // Open Apple's url/postUrl destination. With neither, the lockup
+            // stays visible but deliberately has no action.
+            externalUrl = url?.takeIf { it.startsWith("https://") || it.startsWith("http://") },
+        )
+        "external" -> ShelfItem(
+            title = name,
+            subtitle = artistName,
+            thumbnailUrl = artworkURL,
+            videoId = null,
+            browseId = null,
+            externalUrl = url?.takeIf { it.startsWith("https://") || it.startsWith("http://") },
         )
         else -> null
     }
+    return item?.copy(
+        heroArtworkUrl = heroArtworkURL,
+        badge = badge,
+        description = description,
+        isLive = isLive,
+        editorialType = type,
+        heroKind = heroKind,
+        designTag = designTag,
+        footerTitle = footerTitle,
+        footerArtworkUrl = footerArtworkURL,
+    )
 }
 
 /** Apple's feature-card metadata stays attached to its real destination. */
@@ -543,6 +625,26 @@ internal fun AppleEditorialShelf.toHomeShelf(handle: AppleSources.Handle): HomeS
     if (cards.isEmpty()) return null
     return HomeShelf(title = title, subtitle = "", items = cards)
 }
+
+internal fun AppleEditorialShelf.toEditorialElement(
+    handle: AppleSources.Handle,
+    legacyIndex: Int = 0,
+): AppleEditorialElement = AppleEditorialElement(
+    id = id.ifBlank { "legacy-$legacyIndex-$title" },
+    kind = kind.ifBlank { if (resourceTypes.any { it.equals("songs", true) }) "327" else "326" },
+    displayStyle = displayStyle,
+    title = title,
+    items = items.mapNotNull { it.toShelfItem(handle) },
+    links = links.mapNotNull { link ->
+        if (link.label.isBlank() ||
+            !(link.url.startsWith("https://") || link.url.startsWith("http://"))
+        ) {
+            null
+        } else {
+            com.music.bitchord.data.model.AppleEditorialLink(link.label, link.url, link.target)
+        }
+    },
+)
 
 /** The page this row opens, as the model the detail stack holds. */
 internal fun AppleItem.browseItem(): BrowseItem = BrowseItem(

@@ -210,6 +210,8 @@ enum class SongSort {
     TITLE_DESC,
     DATE_ADDED_ASC,
     DATE_ADDED_DESC,
+    /** Artist A–Z; exposed only where the catalogue supports it. */
+    ARTIST_ASC,
 }
 
 /**

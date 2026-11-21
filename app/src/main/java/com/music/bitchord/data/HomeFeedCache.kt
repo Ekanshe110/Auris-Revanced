@@ -41,13 +41,6 @@ object HomeFeedCache {
     /** How old a kept page may be and still be drawn. */
     const val MAX_AGE_MS = 24 * 60 * 60 * 1000L
 
-    /**
-     * How many shelves are kept. The first screens' worth and then some: the
-     * rest arrives with the fresh feed, and the file stays a few tens of
-     * kilobytes however far the last session scrolled.
-     */
-    private const val MAX_SHELVES = 16
-
     private fun file(context: Context, catalogue: String) =
         File(context.filesDir, "bitchord_home_${catalogue.lowercase()}.json")
 
@@ -99,7 +92,7 @@ object HomeFeedCache {
         JSONObject()
             .put("savedAt", now)
             .put("listener", listenerKey(listener))
-            .put("shelves", JSONArray().apply { snapshot.shelves.take(MAX_SHELVES).forEach { put(it.toJson()) } })
+            .put("shelves", JSONArray().apply { snapshot.shelves.forEach { put(it.toJson()) } })
             .apply { snapshot.header?.let { put("header", it.toJson()) } }
             .toString()
 
@@ -125,6 +118,7 @@ object HomeFeedCache {
         .put("subtitle", subtitle)
         .putOpt("moreBrowseId", moreBrowseId)
         .putOpt("moreParams", moreParams)
+        .put("layout", layout)
         .put("items", items.toJson())
 
     private fun JSONObject.toShelf(): HomeShelf? {
@@ -137,6 +131,7 @@ object HomeFeedCache {
             subtitle = optString("subtitle"),
             moreBrowseId = optStringOrNull("moreBrowseId"),
             moreParams = optStringOrNull("moreParams"),
+            layout = optString("layout"),
         )
     }
 
@@ -150,7 +145,19 @@ object HomeFeedCache {
                     .putOpt("videoId", item.videoId)
                     .putOpt("browseId", item.browseId)
                     .putOpt("year", item.year)
-                    .putOpt("popularity", item.popularity),
+                    .putOpt("popularity", item.popularity)
+                    .putOpt("externalUrl", item.externalUrl)
+                    .putOpt("heroArtworkUrl", item.heroArtworkUrl)
+                    .put("badge", item.badge)
+                    .put("description", item.description)
+                    .putOpt("stationId", item.stationId)
+                    .put("isLive", item.isLive)
+                    .put("editorialType", item.editorialType)
+                    .put("heroKind", item.heroKind)
+                    .put("designTag", item.designTag)
+                    .put("footerTitle", item.footerTitle)
+                    .putOpt("footerArtworkUrl", item.footerArtworkUrl)
+                    .putOpt("dateAdded", item.dateAdded),
             )
         }
     }
@@ -165,6 +172,18 @@ object HomeFeedCache {
             browseId = item.optStringOrNull("browseId"),
             year = if (item.has("year")) item.optInt("year") else null,
             popularity = if (item.has("popularity")) item.optInt("popularity") else null,
+            externalUrl = item.optStringOrNull("externalUrl"),
+            heroArtworkUrl = item.optStringOrNull("heroArtworkUrl"),
+            badge = item.optString("badge"),
+            description = item.optString("description"),
+            stationId = item.optStringOrNull("stationId"),
+            isLive = item.optBoolean("isLive"),
+            editorialType = item.optString("editorialType"),
+            heroKind = item.optString("heroKind"),
+            designTag = item.optString("designTag"),
+            footerTitle = item.optString("footerTitle"),
+            footerArtworkUrl = item.optStringOrNull("footerArtworkUrl"),
+            dateAdded = item.optStringOrNull("dateAdded"),
         )
     }
 

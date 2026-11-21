@@ -4566,7 +4566,11 @@ private fun BitChordApp(
                             // list to reorder, and the device folders already
                             // carry this same control themselves (see
                             // `LocalSearchField`).
-                            if (detail != null && !isLocalDetail && detail.type != BrowseType.ARTIST) {
+                            val appleNonSongCategory = detail?.browseId?.startsWith("apple:library:") == true &&
+                                detail.browseId != "apple:library:songs"
+                            if (detail != null && !isLocalDetail && detail.type != BrowseType.ARTIST &&
+                                !appleNonSongCategory
+                            ) {
                                 // The menu itself is [FrostedSortMenu], composed
                                 // with the app's other frosted overlays further
                                 // down — in the main hierarchy, where the haze
@@ -5016,19 +5020,13 @@ private fun RootPage(
     val flowBanned by com.music.bitchord.data.flow.FlowStore.bannedIds.collectAsStateWithLifecycle()
     val results by viewModel.results.collectAsStateWithLifecycle()
     val exploreState by viewModel.explore.collectAsStateWithLifecycle()
-    // Apple's own stations, for the Radio page under Apple's look.
+    // Apple's ordered Radio elements, with flat shelves only as a legacy fallback.
     val appleRadioState by viewModel.appleRadio.collectAsStateWithLifecycle()
-    // The stations other broadcasters run, for the Radio page under Apple's look.
-    val appleInternationalRadioState by viewModel.appleInternationalRadio.collectAsStateWithLifecycle()
-    // Apple's own sections of the Radio page: the stations by genre, the
-    // sessions, the mixes, the interviews and the shows.
     val appleRadioShelves = viewModel.appleRadioShelvesList
-    // The directory at the foot of Apple's browse page: the rest of the
-    // catalogue, each row a search of Apple's own. It comes from the addon,
-    // so a row Apple adds is a server edit rather than a new build.
-    val appleBrowseDirectory by viewModel.appleDirectory.collectAsStateWithLifecycle()
-    // Apple's browse groups, for the New page under Apple's look.
+    // New's ordered elements and its refresh state.
     val appleBrowseState by viewModel.appleBrowse.collectAsStateWithLifecycle()
+    val appleBrowseElements by viewModel.appleBrowseElements.collectAsStateWithLifecycle()
+    val appleBrowseRefreshing by viewModel.appleBrowseRefreshing.collectAsStateWithLifecycle()
     // Apple's own library, for the Library page under Apple's look.
     val appleLibraryState by viewModel.appleLibrary.collectAsStateWithLifecycle()
     val podcastsState by viewModel.podcasts.collectAsStateWithLifecycle()
@@ -5094,7 +5092,46 @@ private fun RootPage(
         // property declared in another module.
         val browseId = item.browseId
         val externalUrl = item.externalUrl
+        val stationId = item.stationId
         when {
+            stationId != null -> {
+                // Editorial stations use the same playback contract as the
+                // Radio tab: live rows tune the stream; seeded rows play the
+                // exact queue Apple returns. An episode with no song queue is
+                // reported, never replaced with searched or fabricated tracks.
+                pageScope.launch {
+                    if (item.isLive) {
+                        val station = com.music.bitchord.data.model.RadioStation(
+                            id = stationId,
+                            name = item.title,
+                            subtitle = item.subtitle,
+                            artworkUrl = item.thumbnailUrl,
+                            isLive = true,
+                        )
+                        val song = viewModel.appleLiveStationSong(station)
+                        if (song != null) {
+                            pageActions.playFrom(
+                                listOf(song),
+                                0,
+                                QueueSource(item.title, PlaybackSourceType.RADIO),
+                            )
+                        } else {
+                            Toast.makeText(context, R.string.apple_radio_unplayable, Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        val songs = viewModel.appleStationSongs(stationId)
+                        if (songs.isNullOrEmpty()) {
+                            Toast.makeText(context, R.string.apple_radio_unplayable, Toast.LENGTH_SHORT).show()
+                        } else {
+                            pageActions.playFrom(
+                                songs,
+                                0,
+                                QueueSource(item.title, PlaybackSourceType.RADIO),
+                            )
+                        }
+                    }
+                }
+            }
             externalUrl != null -> context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(externalUrl)),
             )
@@ -5789,9 +5826,6 @@ private fun RootPage(
                 onItemClick = onHomeItemClick,
                 onItemLongPress = pageActions.onShelfLongPress,
                 onRetry = viewModel::loadHome,
-                refreshing = MainViewModel.Feed.HOME in refreshing,
-                onRefresh = { viewModel.refresh(MainViewModel.Feed.HOME) },
-                pullState = scroll.homePull,
                 contentPadding = listPadding,
             )
         } else {
@@ -5918,12 +5952,9 @@ private fun RootPage(
             listState = scroll.appleNew,
             onItemClick = onHomeItemClick,
             onItemLongPress = pageActions.onShelfLongPress,
-            // The directory: a way into the rest of Apple's catalogue, each
-            // row a search of Apple's own.
-            directory = appleBrowseDirectory,
-            onBrowse = { term ->
-                viewModel.searchFor(term)
-                nav.selectedTab = TAB_SEARCH
+            elements = appleBrowseElements,
+            onLinkClick = { link ->
+                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link.url)))
             },
             // The chevron after a group's title: the whole group, not one
             // card of it. The items are already loaded, so the page is local.
@@ -5931,84 +5962,38 @@ private fun RootPage(
                 viewModel.openShelfPage(shelf)
                 sheets.detailActiveShelf = shelf
             },
-            onRetry = viewModel::loadAppleBrowse,
-            refreshing = false,
-            onRefresh = { viewModel.loadAppleBrowse() },
+            onRetry = { viewModel.loadAppleBrowse() },
+            refreshing = appleBrowseRefreshing,
+            onRefresh = { viewModel.loadAppleBrowse(refresh = true) },
             pullState = scroll.appleNewPull,
             contentPadding = listPadding,
             title = stringResource(R.string.apple_new_tab),
         )
         TAB_RADIO -> if (appleUi) {
-            // Apple's radio: its own stations, live ones marked and opened in
-            // Apple's player, seeded ones played here. No Flow, and no
-            // "search a station" — neither is Apple's.
+            // Apple's ordered Radio grouping. Stations share the same direct
+            // live/seeded playback path as New and Home editorial cards.
             AppleRadioScreen(
                 state = appleRadioState,
-                international = appleInternationalRadioState,
                 shelves = appleRadioShelves,
                 listState = scroll.radio,
+                onItemClick = onHomeItemClick,
+                onLinkClick = { link ->
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link.url)))
+                },
                 onRowClick = { row ->
-                    // A playlist of Apple's own opens as a page of its own,
-                    // the way it does in Apple's app.
-                    val browseId = row.browseId
-                    if (browseId != null) {
-                        viewModel.openDetail(
-                            browseId = browseId,
+                    // Legacy rows enter the same route as ordered ShelfItems.
+                    onHomeItemClick(
+                        ShelfItem(
                             title = row.name,
                             subtitle = row.subtitle.orEmpty(),
                             thumbnailUrl = row.artworkUrl,
-                        )
-                    }
-                },
-                onStationClick = onStationClick@{ station ->
-                    val browseId = station.browseId
-                    if (browseId != null) {
-                        viewModel.openDetail(
-                            browseId = browseId,
-                            title = station.name,
-                            subtitle = station.subtitle.orEmpty(),
-                            thumbnailUrl = station.artworkUrl,
-                        )
-                        return@onStationClick
-                    }
-                    if (station.isLive) {
-                        // A live station plays here. Its audio is
-                        // Widevine-protected, so the addon publishes the
-                        // stream and the license endpoint, the device does
-                        // the handshake, and the station is heard in this
-                        // app — no browser, no hand-off to Apple's player.
-                        pageScope.launch {
-                            val song = viewModel.appleLiveStationSong(station)
-                            if (song == null) {
-                                // The station could not be opened for playback.
-                                // Nothing else is offered in its place: the
-                                // row says LIVE, and a live station either
-                                // plays here or says why it cannot.
-                                Toast.makeText(
-                                    context,
-                                    R.string.apple_radio_unplayable,
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                                return@launch
-                            }
-                            pageActions.playFrom(
-                                listOf(song),
-                                0,
-                                QueueSource(station.name, PlaybackSourceType.RADIO),
-                            )
-                        }
-                    } else {
-                        // A seeded station is a queue of songs, and it plays
-                        // here.
-                        pageScope.launch {
-                            val songs = viewModel.appleStationSongs(station.id) ?: return@launch
-                            pageActions.playFrom(
-                                songs,
-                                0,
-                                QueueSource(station.name, PlaybackSourceType.RADIO),
-                            )
-                        }
-                    }
+                            videoId = null,
+                            browseId = row.browseId,
+                            stationId = row.id.takeIf { row.browseId == null },
+                            isLive = row.isLive,
+                        ),
+                        row.name,
+                    )
                 },
                 onRetry = viewModel::loadAppleRadio,
                 refreshing = MainViewModel.Feed.EXPLORE in refreshing,
@@ -6325,10 +6310,8 @@ private fun RootPage(
             },
         )
         else -> if (appleUi) {
-            // Apple's library: the listener's own playlists, and nothing
-            // else. Another service's library under Apple's heading is not
-            // Apple's library.
-            val appleLibraryLabel = stringResource(R.string.library)
+            // Apple's categories and mixed Recently Added grid, with no rows
+            // borrowed from another provider's library.
             AppleLibraryScreen(
                 state = appleLibraryState,
                 listState = scroll.library,
@@ -6344,15 +6327,7 @@ private fun RootPage(
                         )
                     }
                 },
-                onSongClick = { song ->
-                    // A song of the listener's own plays where it stands,
-                    // the way a song plays in Apple's own library.
-                    pageActions.playFrom(
-                        listOf(song),
-                        0,
-                        QueueSource(appleLibraryLabel, PlaybackSourceType.LIBRARY),
-                    )
-                },
+                onItemLongPress = pageActions.onBrowseLongPress,
                 onRetry = viewModel::loadAppleLibrary,
                 refreshing = MainViewModel.Feed.LIBRARY in refreshing,
                 onRefresh = { viewModel.refresh(MainViewModel.Feed.LIBRARY) },
@@ -7349,9 +7324,25 @@ private fun RootOverlays(
 
     if (sheets.songSortMenuOpen) {
         BackHandler { sheets.songSortMenuOpen = false }
+        val appleSongLibrary = detail?.browseId == "apple:library:songs"
         FrostedSortMenu(
             hazeState = hazeState,
             selected = songSort,
+            options = if (appleSongLibrary) {
+                listOf(
+                    SongSort.DEFAULT,
+                    SongSort.TITLE_ASC,
+                    SongSort.DATE_ADDED_DESC,
+                    SongSort.ARTIST_ASC,
+                )
+            } else {
+                SongSort.entries.filter {
+                    it != SongSort.DATE_ADDED_ASC &&
+                        it != SongSort.DATE_ADDED_DESC &&
+                        it != SongSort.ARTIST_ASC
+                }
+            },
+            allowDateFlip = !appleSongLibrary,
             onSelect = { option ->
                 detail?.browseId?.let { AppSettings.setDetailSongSort(it, option) }
                 sheets.songSortMenuOpen = false
@@ -8289,6 +8280,8 @@ private fun LibrarySort.localizedLabel(): String = when (this) {
 private fun FrostedSortMenu(
     hazeState: HazeState,
     selected: SongSort,
+    options: List<SongSort>,
+    allowDateFlip: Boolean,
     onSelect: (SongSort) -> Unit,
     onFlipDateDirection: () -> Unit,
     onDismiss: () -> Unit,
@@ -8335,7 +8328,7 @@ private fun FrostedSortMenu(
                     animationSpec = tween(durationMillis = 200),
                     label = "dateAddedArrow",
                 )
-                Row(
+                if (allowDateFlip) Row(
                     Modifier
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
@@ -8357,9 +8350,7 @@ private fun FrostedSortMenu(
                         )
                     }
                 }
-                SongSort.entries
-                    .filter { it != SongSort.DATE_ADDED_ASC && it != SongSort.DATE_ADDED_DESC }
-                    .forEach { option ->
+                options.forEach { option ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -8394,6 +8385,7 @@ private fun SongSort.localizedLabel(): String = when (this) {
     SongSort.TITLE_DESC -> stringResource(R.string.sort_title_descending)
     SongSort.DATE_ADDED_ASC -> stringResource(R.string.sort_date_added_oldest)
     SongSort.DATE_ADDED_DESC -> stringResource(R.string.sort_date_added)
+    SongSort.ARTIST_ASC -> stringResource(R.string.artists)
 }
 
 /**

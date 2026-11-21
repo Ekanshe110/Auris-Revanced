@@ -1,8 +1,12 @@
 package com.music.bitchord
 
 import com.music.bitchord.data.apple.AppleEditorialItem
+import com.music.bitchord.data.apple.AppleEditorialLink
 import com.music.bitchord.data.apple.AppleEditorialShelf
+import com.music.bitchord.data.apple.AppleItem
 import com.music.bitchord.data.apple.AppleSources
+import com.music.bitchord.data.apple.shelfItem
+import com.music.bitchord.data.apple.toEditorialElement
 import com.music.bitchord.data.apple.toEditorialHero
 import com.music.bitchord.data.apple.toHomeShelf
 import com.music.bitchord.data.apple.toShelfItem
@@ -136,6 +140,105 @@ class AppleEditorialMappingTest {
             assertEquals("Apple badge", hero?.badge)
             assertEquals("Apple editorial note", hero?.description)
         }
+    }
+
+    @Test
+    fun `Home stations and editorial destinations retain their real routes`() {
+        val station = AppleItem(
+            type = "station",
+            id = "ra.q-test",
+            title = "Love",
+            artist = "Radio Station",
+            isLive = true,
+        ).shelfItem(handle.configId)
+        val concert = AppleItem(
+            type = "external",
+            id = "editorial-id",
+            title = "Find Concerts Nearby",
+            artist = "Upcoming shows will appear here.",
+            url = "https://music.apple.com/concerts?route=set-location",
+        ).shelfItem(handle.configId)
+
+        assertEquals(AppleSources.STATION_PREFIX + "ra.q-test", station?.browseId)
+        assertEquals("ra.q-test", station?.stationId)
+        assertEquals(true, station?.isLive)
+        assertEquals("station", station?.editorialType)
+        assertNull(station?.videoId)
+        assertEquals("https://music.apple.com/concerts?route=set-location", concert?.externalUrl)
+        assertNull(concert?.browseId)
+        assertNull(concert?.videoId)
+    }
+
+    @Test
+    fun `Home feature metadata survives wire to card mapping`() {
+        val item = AppleItem(
+            type = "playlist",
+            id = "pl.test",
+            title = "Feel Good",
+            heroArtworkURL = "https://img/hero.jpg",
+            badge = "Mood for You",
+            description = "The most uplifting tracks to brighten your day.",
+        ).shelfItem(handle.configId)
+
+        assertEquals("https://img/hero.jpg", item?.heroArtworkUrl)
+        assertEquals("Mood for You", item?.badge)
+        assertEquals("The most uplifting tracks to brighten your day.", item?.description)
+    }
+
+    @Test
+    fun `ordered elements retain upstream layout links and empty sections`() {
+        val directory = AppleEditorialShelf(
+            id = "6745339928",
+            kind = "391",
+            title = "More to Explore",
+            links = listOf(
+                AppleEditorialLink(
+                    label = "Charts",
+                    url = "https://music.apple.com/in/charts",
+                    target = "charts",
+                ),
+                AppleEditorialLink(label = "Invalid", url = "not-a-url"),
+            ),
+        ).toEditorialElement(handle)
+        val empty = AppleEditorialShelf(
+            id = "6738239144",
+            kind = "326",
+            displayStyle = "compact",
+            title = "Local Broadcasters",
+        ).toEditorialElement(handle)
+
+        assertEquals("6745339928", directory.id)
+        assertEquals("391", directory.kind)
+        assertEquals("Charts", directory.links.single().label)
+        assertEquals("https://music.apple.com/in/charts", directory.links.single().url)
+        assertEquals("charts", directory.links.single().target)
+        assertEquals("6738239144", empty.id)
+        assertEquals("compact", empty.displayStyle)
+        assertEquals(emptyList<Nothing>(), empty.items)
+    }
+
+    @Test
+    fun `ordered station items retain live and seeded playback identity`() {
+        val station = AppleEditorialShelf(
+            id = "on-air",
+            kind = "488",
+            title = "On Air Now",
+            items = listOf(
+                AppleEditorialItem(
+                    id = "ra.978194965",
+                    type = "stations",
+                    name = "Apple Music 1",
+                    provider = "Apple Music",
+                    isLive = true,
+                ),
+            ),
+        ).toEditorialElement(handle).items.single()
+
+        assertEquals("ra.978194965", station.stationId)
+        assertEquals("Apple Music", station.subtitle)
+        assertEquals(true, station.isLive)
+        assertEquals(AppleSources.STATION_PREFIX + "ra.978194965", station.browseId)
+        assertNull(station.videoId)
     }
 
     @Test

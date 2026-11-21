@@ -20,6 +20,8 @@ data class AppleShelf(
     @SerialName("title") val title: String = "",
     @SerialName("subtitle") val subtitle: String = "",
     @SerialName("artworkURL") val artworkURL: String? = null,
+    /** Apple's presentation for this group: hero, concert, or an ordinary shelf. */
+    @SerialName("layout") val layout: String = "",
     @SerialName("items") val items: List<AppleItem> = emptyList(),
 )
 
@@ -46,6 +48,8 @@ data class AppleItem(
     @SerialName("title") val title: String = "",
     @SerialName("artist") val artist: String = "",
     @SerialName("album") val album: String = "",
+    /** Apple's library-added timestamp; never inferred from row position. */
+    @SerialName("dateAdded") val dateAdded: String? = null,
     @SerialName("artworkURL") val artworkURL: String? = null,
     @SerialName("durationMs") val durationMs: Long = 0,
     /**
@@ -59,6 +63,10 @@ data class AppleItem(
     @SerialName("isrc") val isrc: String? = null,
     @SerialName("hasDrm") val hasDrm: Boolean? = null,
     @SerialName("url") val url: String? = null,
+    @SerialName("heroArtworkURL") val heroArtworkURL: String? = null,
+    @SerialName("badge") val badge: String = "",
+    @SerialName("description") val description: String = "",
+    @SerialName("isLive") val isLive: Boolean = false,
     /**
      * Whether Apple holds a Dolby Atmos mix of this recording.
      *

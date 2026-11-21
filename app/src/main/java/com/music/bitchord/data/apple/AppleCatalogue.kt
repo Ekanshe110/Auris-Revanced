@@ -299,16 +299,21 @@ object AppleCatalogue {
      * for a label: a shelf is the shelf the vendor draws, and it refreshes
      * with the page instead of with this build.
      */
-    suspend fun editorialPage(baseUrl: String, page: String = "new"): Result<AppleEditorialPage> =
+    suspend fun editorialPage(
+        baseUrl: String,
+        page: String = "new",
+        refresh: Boolean = false,
+    ): Result<AppleEditorialPage> =
         get(
             baseUrl,
             listOf("browse", "page"),
-            // A nonce, so a refresh asks the network rather than whatever the
-            // HTTP layer still holds. The New page is rebuilt from the addon
-            // each time it opens; a cached answer that predates a catalogue
-            // change is how the page came back with two shelves instead of
-            // the seventeen the addon serves.
-            mapOf("page" to page, "n" to System.currentTimeMillis().toString()),
+            // A nonce bypasses the HTTP cache. refresh=1 also bypasses the
+            // addon's short editorial cache for an explicit user refresh.
+            buildMap {
+                put("page", page)
+                put("n", System.currentTimeMillis().toString())
+                if (refresh) put("refresh", "1")
+            },
             AppleEditorialPage.serializer(),
         )
 
@@ -703,14 +708,33 @@ data class AppleEditorialItem(
     @SerialName("url") val url: String? = null,
     @SerialName("badge") val badge: String = "",
     @SerialName("description") val description: String = "",
+    @SerialName("isLive") val isLive: Boolean = false,
+    @SerialName("provider") val provider: String? = null,
+    @SerialName("brandType") val brandType: String = "",
+    @SerialName("heroArtworkURL") val heroArtworkURL: String? = null,
+    @SerialName("heroKind") val heroKind: String = "",
+    @SerialName("designTag") val designTag: String = "",
+    @SerialName("footerTitle") val footerTitle: String = "",
+    @SerialName("footerArtworkURL") val footerArtworkURL: String? = null,
 )
 
-/** One shelf of an editorial page Apple publishes. */
+@Serializable
+data class AppleEditorialLink(
+    @SerialName("label") val label: String = "",
+    @SerialName("url") val url: String = "",
+    @SerialName("target") val target: String = "",
+)
+
+/** One ordered editorial element; older servers populate only title/items. */
 @Serializable
 data class AppleEditorialShelf(
+    @SerialName("id") val id: String = "",
+    @SerialName("kind") val kind: String = "",
+    @SerialName("displayStyle") val displayStyle: String = "",
     @SerialName("title") val title: String = "",
     @SerialName("resourceTypes") val resourceTypes: List<String> = emptyList(),
     @SerialName("items") val items: List<AppleEditorialItem> = emptyList(),
+    @SerialName("links") val links: List<AppleEditorialLink> = emptyList(),
 )
 
 /** A page Apple publishes — New or Radio — as the shelves it is made of. */
@@ -719,6 +743,7 @@ data class AppleEditorialPage(
     @SerialName("page") val page: String = "",
     @SerialName("updatedAt") val updatedAt: String = "",
     @SerialName("heroes") val heroes: List<AppleEditorialItem> = emptyList(),
+    @SerialName("elements") val elements: List<AppleEditorialShelf> = emptyList(),
     @SerialName("shelves") val shelves: List<AppleEditorialShelf> = emptyList(),
 )
 

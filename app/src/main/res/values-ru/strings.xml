@@ -351,6 +351,7 @@
     <string name="no_local_audio_found">На этом устройстве не найдено аудиофайлов</string>
     <string name="no_internet_connection">Нет подключения к интернету</string>
     <string name="youtube_request_rejected">YouTube Music отклонил запрос. Попробуйте войти снова.</string>
+    <string name="apple_request_rejected">Apple Music rejected the request. Check the Apple Music addon session and try again.</string>
     <string name="something_went_wrong">Что-то пошло не так</string>
     <string name="unknown_artist">Неизвестный исполнитель</string>
     <plurals name="downloads_failed_count">
@@ -1685,6 +1686,8 @@
     <string name="provider_apple_only_catalogue_subtitle">Play and offer only what is in Apple Music\'s catalogue</string>
     <string name="apple_new_tab">New</string>
     <string name="apple_library_empty">No Music</string>
+    <string name="apple_library_empty_playlists">No playlists in your Apple Music library</string>
+    <string name="apple_library_search_in">Find in %1$s</string>
     <plurals name="apple_only_catalogue_dropped">
         <item quantity="one">%d track is not in Apple Music and was left out</item>
         <item quantity="other">%d tracks are not in Apple Music and were left out</item>

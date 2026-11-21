@@ -379,6 +379,7 @@
     <string name="no_local_audio_found">Không tìm thấy tệp âm thanh nào trên thiết bị</string>
     <string name="no_internet_connection">Không có kết nối internet</string>
     <string name="youtube_request_rejected">YouTube Music đã từ chối yêu cầu. Hãy thử đăng nhập lại.</string>
+    <string name="apple_request_rejected">Apple Music rejected the request. Check the Apple Music addon session and try again.</string>
     <string name="something_went_wrong">Đã xảy ra lỗi</string>
     <string name="unknown_artist">Nghệ sĩ không xác định</string>
     <plurals name="downloads_failed_count">
@@ -1570,6 +1571,8 @@
     <string name="provider_apple_only_catalogue_subtitle">Play and offer only what is in Apple Music\'s catalogue</string>
     <string name="apple_new_tab">New</string>
     <string name="apple_library_empty">No Music</string>
+    <string name="apple_library_empty_playlists">No playlists in your Apple Music library</string>
+    <string name="apple_library_search_in">Find in %1$s</string>
     <plurals name="apple_only_catalogue_dropped">
         <item quantity="one">%d track is not in Apple Music and was left out</item>
         <item quantity="other">%d tracks are not in Apple Music and were left out</item>
